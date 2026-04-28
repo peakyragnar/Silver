@@ -22,6 +22,26 @@ A backtest at `asof_date = D` may use only data with `available_at <= D`.
 - Labels are unavailable until their horizon has elapsed.
 - Backtests must fail closed when `available_at` is missing.
 
+## Policy Config
+
+Initial source-specific policy definitions live in
+`config/available_at_policies.yaml`.
+
+Validate them without a live database:
+
+```bash
+python scripts/seed_available_at_policies.py --check
+```
+
+Seed or update `silver.available_at_policies` after migrations are applied:
+
+```bash
+python scripts/seed_available_at_policies.py
+```
+
+The seed command reads `DATABASE_URL` from the environment unless
+`--database-url` is provided.
+
 ## Test Expectations
 
 Add tests that deliberately attempt to use future data and assert rejection.

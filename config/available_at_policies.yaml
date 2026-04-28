@@ -1,0 +1,131 @@
+policy_set_version: 1
+description: Initial source-specific available_at policy definitions from SPEC.md section 6.2.
+policies:
+  - name: daily_price
+    version: 1
+    valid_from: "1970-01-01T00:00:00+00:00"
+    rule:
+      type: date_at_time
+      base: price_date
+      time: "18:00"
+      timezone: America/New_York
+      calendar: NYSE
+    notes: Post-close plus adjustment buffer.
+
+  - name: sec_10k_filing
+    version: 1
+    valid_from: "1970-01-01T00:00:00+00:00"
+    rule:
+      type: next_trading_session_time_after_timestamp
+      base: accepted_at
+      trading_days_offset: 1
+      time: "09:30"
+      timezone: America/New_York
+      calendar: NYSE
+      forms:
+        - 10-K
+    notes: Filings can drop after market close; earliest conservative action is next open.
+
+  - name: sec_10q_filing
+    version: 1
+    valid_from: "1970-01-01T00:00:00+00:00"
+    rule:
+      type: next_trading_session_time_after_timestamp
+      base: accepted_at
+      trading_days_offset: 1
+      time: "09:30"
+      timezone: America/New_York
+      calendar: NYSE
+      forms:
+        - 10-Q
+    notes: Same timing rule as 10-K filings.
+
+  - name: sec_8k_material
+    version: 1
+    valid_from: "1970-01-01T00:00:00+00:00"
+    rule:
+      type: timestamp_plus_duration
+      base: accepted_at
+      duration: PT30M
+      applies_when: material
+    notes: Material 8-Ks may affect prices intraday.
+
+  - name: earnings_call_transcript
+    version: 1
+    valid_from: "1970-01-01T00:00:00+00:00"
+    rule:
+      type: timestamp_plus_duration_with_fallback
+      base: call_end_time
+      duration: PT2H
+      fallback_base: fetched_at
+      fallback_duration: PT0S
+    notes: Vendor transcript delay; use fetched_at when call_end_time is unavailable.
+
+  - name: press_release_timestamped
+    version: 1
+    valid_from: "1970-01-01T00:00:00+00:00"
+    rule:
+      type: timestamp_plus_duration
+      base: release_time
+      duration: PT5M
+    notes: Wire delivery latency for timestamped releases.
+
+  - name: press_release_date_only
+    version: 1
+    valid_from: "1970-01-01T00:00:00+00:00"
+    rule:
+      type: next_trading_session_time_after_date
+      base: release_date
+      trading_days_offset: 1
+      time: "09:30"
+      timezone: America/New_York
+      calendar: NYSE
+    notes: Conservative next-open rule when source time is unknown.
+
+  - name: fundamental_fact_from_filing
+    version: 1
+    valid_from: "1970-01-01T00:00:00+00:00"
+    rule:
+      type: inherit_source_available_at
+      source: filing
+    notes: Derived facts cannot be earlier than the source filing.
+
+  - name: fmp_profile_static_data
+    version: 1
+    valid_from: "1970-01-01T00:00:00+00:00"
+    rule:
+      type: fetched_at
+      base: fetched_at
+    notes: Reference profile data is available when fetched.
+
+  - name: corporate_action
+    version: 1
+    valid_from: "1970-01-01T00:00:00+00:00"
+    rule:
+      type: date_at_time
+      base: ex_date
+      time: "09:30"
+      timezone: America/New_York
+      calendar: NYSE
+    notes: Corporate actions take effect at the open on ex-date.
+
+  - name: news_timestamped
+    version: 1
+    valid_from: "1970-01-01T00:00:00+00:00"
+    rule:
+      type: timestamp_plus_duration
+      base: published_at
+      duration: PT5M
+    notes: Aggregator latency for timestamped news.
+
+  - name: xbrl_companyfacts
+    version: 1
+    valid_from: "1970-01-01T00:00:00+00:00"
+    rule:
+      type: next_trading_session_time_after_timestamp
+      base: filing.accepted_at
+      trading_days_offset: 1
+      time: "09:30"
+      timezone: America/New_York
+      calendar: NYSE
+    notes: Same availability as the underlying filing.
