@@ -173,6 +173,71 @@ PHASE1_ANALYTICS_REQUIRED_SNIPPETS = (
     "references silver.feature_definitions(id) on delete restrict",
     "feature_definitions_immutable_when_referenced",
 )
+PHASE2_BACKTEST_METADATA_MIGRATION = "004_backtest_metadata.sql"
+PHASE2_BACKTEST_METADATA_TABLES = (
+    "model_runs",
+    "backtest_runs",
+)
+PHASE2_BACKTEST_METADATA_COLUMNS = {
+    "model_runs": (
+        "model_run_key",
+        "name",
+        "code_git_sha",
+        "feature_set_hash",
+        "feature_snapshot_ref",
+        "training_start_date",
+        "training_end_date",
+        "test_start_date",
+        "test_end_date",
+        "horizon_days",
+        "target_kind",
+        "random_seed",
+        "cost_assumptions",
+        "parameters",
+        "metrics",
+        "available_at_policy_versions",
+        "input_fingerprints",
+        "started_at",
+        "finished_at",
+        "status",
+        "created_at",
+    ),
+    "backtest_runs": (
+        "backtest_run_key",
+        "model_run_id",
+        "name",
+        "universe_name",
+        "horizon_days",
+        "target_kind",
+        "cost_assumptions",
+        "parameters",
+        "metrics",
+        "metrics_by_regime",
+        "baseline_metrics",
+        "label_scramble_metrics",
+        "label_scramble_pass",
+        "multiple_comparisons_correction",
+        "started_at",
+        "finished_at",
+        "status",
+        "created_at",
+    ),
+}
+PHASE2_BACKTEST_METADATA_REQUIRED_SNIPPETS = (
+    "unique (model_run_key)",
+    "unique (backtest_run_key)",
+    "references silver.model_runs(id) on delete restrict",
+    "check (btrim(model_run_key) <> '')",
+    "check (btrim(backtest_run_key) <> '')",
+    "check (feature_set_hash ~ '^[0-9a-f]{64}$')",
+    "check (test_start_date > training_end_date)",
+    "check (horizon_days in (5, 21, 63, 126, 252))",
+    "check (jsonb_typeof(cost_assumptions) = 'object')",
+    "check (jsonb_typeof(parameters) = 'object')",
+    "check (jsonb_typeof(metrics) = 'object')",
+    "check (finished_at is null or finished_at >= started_at)",
+    "check ((status = 'running') = (finished_at is null))",
+)
 
 
 class MigrationError(RuntimeError):
@@ -263,6 +328,8 @@ def validate_static_schema(migrations: Sequence[Migration]) -> None:
 
     if len(migrations) >= 3:
         validate_phase1_analytics_schema(migrations[2])
+    if len(migrations) >= 4:
+        validate_phase2_backtest_metadata_schema(migrations[3])
 
 
 def validate_phase1_analytics_schema(migration: Migration) -> None:
@@ -290,6 +357,37 @@ def validate_phase1_analytics_schema(migration: Migration) -> None:
         if snippet not in normalized_sql:
             raise MigrationError(
                 f"{PHASE1_ANALYTICS_MIGRATION} is missing required SQL: {snippet}"
+            )
+
+
+def validate_phase2_backtest_metadata_schema(migration: Migration) -> None:
+    if migration.path.name != PHASE2_BACKTEST_METADATA_MIGRATION:
+        raise MigrationError(
+            "fourth migration must be "
+            f"db/migrations/{PHASE2_BACKTEST_METADATA_MIGRATION}"
+        )
+
+    sql = migration.sql
+    tables = tuple(match.lower() for match in TABLE_RE.findall(sql))
+    if tables != PHASE2_BACKTEST_METADATA_TABLES:
+        raise MigrationError(
+            f"{PHASE2_BACKTEST_METADATA_MIGRATION} must create exactly the Phase 2 "
+            f"backtest metadata tables {PHASE2_BACKTEST_METADATA_TABLES}; "
+            f"found {tables}"
+        )
+
+    for table, columns in PHASE2_BACKTEST_METADATA_COLUMNS.items():
+        body = _table_body(sql, table)
+        for column in columns:
+            if not re.search(rf"\b{re.escape(column)}\b", body, re.I):
+                raise MigrationError(f"silver.{table} is missing column {column}")
+
+    normalized_sql = _normalize_sql(sql)
+    for snippet in PHASE2_BACKTEST_METADATA_REQUIRED_SNIPPETS:
+        if snippet not in normalized_sql:
+            raise MigrationError(
+                f"{PHASE2_BACKTEST_METADATA_MIGRATION} is missing required SQL: "
+                f"{snippet}"
             )
 
 

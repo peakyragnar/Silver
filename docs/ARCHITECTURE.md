@@ -45,6 +45,10 @@ Numbered SQL migrations live under `db/migrations/`. Run
 `python scripts/apply_migrations.py --check` to validate migration order and
 static schema expectations without a live database.
 
+Phase 2 starts the durable backtest reproducibility registry with
+`silver.model_runs` and `silver.backtest_runs`. These tables hold run metadata
+only until model and backtest runners are explicitly wired to write them.
+
 For a clean local Postgres database, prefer the single bootstrap command:
 
 ```bash
