@@ -26,10 +26,47 @@ Silver is prepared to be run by the local Symphony checkout at
 If the Linear project changes, edit [`../WORKFLOW.md`](../WORKFLOW.md):
 
 - Set `tracker.project_slug` to the new Silver Linear project slug.
-- Keep `agent.max_concurrent_agents` low at first (`1` or `2`).
+- Keep `agent.max_concurrent_agents` at a level Michael can review; current
+  operating target is `5`.
 - Keep the workspace root outside this repository.
-- Keep `In Review` as a non-active Linear state so completed PRs stop being
-  picked up by Symphony while they wait for human review.
+- Keep `Human Review` as a non-active Linear state so completed PRs stop being
+  picked up by Symphony while they wait for Michael's review.
+
+## Linear State Machine
+
+Silver uses Linear as the Symphony control plane:
+
+| State | Symphony active? | Meaning |
+|---|---:|---|
+| `Backlog` | No | Planned work; do not start. |
+| `Todo` | Yes | Ready for an agent to start. |
+| `In Progress` | Yes | Agent is implementing the ticket. |
+| `Rework` | Yes | Human or CI requested changes; agent should repair the PR. |
+| `Human Review` | No | Agent has posted a proof packet and is waiting for Michael. |
+| `Merging` | Yes | Michael approved; agent should queue/merge and then mark done. |
+| `Done` | No | Complete. |
+| `Canceled` / `Duplicate` | No | Terminal non-work states. |
+
+The key rule is that agents do not mark their own implementation work `Done`.
+They move implementation tickets to `Human Review` with evidence. Michael moves
+approved tickets to `Merging`; a merge-steward agent then handles GitHub merge
+queue and marks the issue `Done` after the PR lands.
+
+## Proof Packets
+
+Every ticket moved to `Human Review` should have a Linear comment headed
+`## Proof Packet` containing:
+
+- PR link.
+- Changed files summary.
+- Acceptance criteria status.
+- Validation commands run and outcome.
+- CI status or link.
+- Risks, assumptions, and known gaps.
+- Generated artifact path or link when relevant.
+
+For Silver, proof is usually a command result, test output, migration check, or
+generated report. A prose claim that something is done is not enough.
 
 ## Run
 
