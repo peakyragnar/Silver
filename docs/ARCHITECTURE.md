@@ -41,6 +41,13 @@ source of truth for table shape. Python code should use typed helper functions
 or repository-local query helpers rather than ad hoc SQL scattered across
 scripts.
 
+Numbered SQL migrations live under `db/migrations/`. Run
+`python scripts/apply_migrations.py --check` to validate migration order and
+static schema expectations without a live database. To apply migrations to a
+clean local Postgres database, set `DATABASE_URL` and run
+`python scripts/apply_migrations.py`; the apply path records checksums in
+`silver.schema_migrations` and requires the `psql` client.
+
 ## External Data Boundary
 
 Allowed sources for v1 are FMP, SEC EDGAR, optional Arrow raw byte caches, and
