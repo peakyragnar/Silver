@@ -1,5 +1,14 @@
 """Point-in-time feature calculations and feature-store helpers."""
 
+from silver.features.dollar_volume import (
+    AVG_DOLLAR_VOLUME_63_DEFINITION,
+    AdjustedPriceVolumeObservation,
+    DollarVolumeFeatureValue,
+    DollarVolumeInputError,
+    DollarVolumeStatus,
+    DollarVolumeWindow,
+    compute_avg_dollar_volume_63,
+)
 from silver.features.momentum_12_1 import (
     DAILY_PRICE_POLICY_NAME,
     DAILY_PRICE_POLICY_VERSION,
@@ -29,11 +38,17 @@ from silver.features.repository import (
 )
 
 __all__ = [
+    "AVG_DOLLAR_VOLUME_63_DEFINITION",
     "DAILY_PRICE_POLICY_NAME",
     "DAILY_PRICE_POLICY_VERSION",
     "MOMENTUM_12_1_DEFINITION",
     "AdjustedDailyPriceObservation",
+    "AdjustedPriceVolumeObservation",
     "AvailableAtPolicyRecord",
+    "DollarVolumeFeatureValue",
+    "DollarVolumeInputError",
+    "DollarVolumeStatus",
+    "DollarVolumeWindow",
     "FeatureDefinitionRecord",
     "FeatureStoreError",
     "FeatureStoreRepository",
@@ -45,6 +60,7 @@ __all__ = [
     "NumericFeatureDefinition",
     "NumericFeatureValue",
     "UniverseMembershipRecord",
+    "compute_avg_dollar_volume_63",
     "compute_momentum_12_1",
     "daily_price_available_at",
     "feature_definition_hash",
