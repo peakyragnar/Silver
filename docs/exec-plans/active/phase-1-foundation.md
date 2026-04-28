@@ -21,6 +21,8 @@ signal on the seed universe.
 - [x] Trading calendar is seeded for 2014-2026
 - [x] Seed universe contains NVDA, MSFT, AAPL, GOOGL, and JPM
 - [ ] Prices can be ingested for the seed universe
+- [x] Phase 1 analytics migration defines normalized prices, forward labels,
+  versioned numeric features, and minimal analytics run metadata
 - [ ] Labels are computed for 5, 21, 63, 126, and 252 trading-day horizons
 - [ ] Momentum 12-1 feature is computed without lookahead
 - [ ] Backtest includes costs, baselines, regimes, and label-scramble
