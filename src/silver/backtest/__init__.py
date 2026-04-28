@@ -1,5 +1,14 @@
 """Backtest planning, runner, and falsifier primitives."""
 
+from silver.backtest.label_scramble import (
+    LabelScrambleAlternative,
+    LabelScrambleInputError,
+    LabelScrambleResult,
+    LabelScrambleSample,
+    LabelScrambleScoringFunction,
+    rank_correlation_score,
+    run_label_scramble,
+)
 from silver.backtest.momentum_falsifier import (
     DEFAULT_MIN_TRAIN_SESSIONS,
     DEFAULT_ROUND_TRIP_COST_BPS,
@@ -42,6 +51,11 @@ __all__ = [
     "DEFAULT_TEST_SESSIONS",
     "BacktestSampleCounts",
     "BaselineComparison",
+    "LabelScrambleAlternative",
+    "LabelScrambleInputError",
+    "LabelScrambleResult",
+    "LabelScrambleSample",
+    "LabelScrambleScoringFunction",
     "LinearMomentumModel",
     "MomentumBacktestConfig",
     "MomentumBacktestError",
@@ -62,6 +76,8 @@ __all__ = [
     "WalkForwardConfigError",
     "WalkForwardSplit",
     "plan_walk_forward_splits",
+    "rank_correlation_score",
+    "run_label_scramble",
     "run_momentum_12_1_backtest",
     "run_momentum_falsifier",
 ]
