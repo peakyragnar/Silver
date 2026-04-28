@@ -17,6 +17,32 @@ python scripts/run_falsifier.py --strategy momentum_12_1 --horizon 63 --universe
 Not all commands exist at repository bootstrap. If a command does not exist yet,
 record that it was unavailable.
 
+## CI Merge-Readiness Gate
+
+GitHub Actions runs the merge-readiness gate on every pull request and every
+push to `main`. This gate is the shared pre-review proof that the repository
+installs from declared dependencies, validates offline seed/config checks, runs
+tests, and passes lint. It does not implement branch protection, auto-merge, or
+a merge queue; those are future harness layers.
+
+The local equivalent is:
+
+```bash
+uv sync --locked --group dev --python 3.10
+source .venv/bin/activate
+git diff --check
+python scripts/bootstrap_database.py --check
+python scripts/apply_migrations.py --check
+python scripts/seed_available_at_policies.py --check
+python scripts/seed_reference_data.py --check
+python scripts/seed_trading_calendar.py --check
+python -m pytest
+ruff check .
+```
+
+The `--check` seed and migration commands are intentionally offline. They must
+not require `DATABASE_URL`, `FMP_API_KEY`, or other live service credentials.
+
 ## Required Test Classes
 
 - Unit tests for calendar math, `available_at` policy logic, costs, and labels

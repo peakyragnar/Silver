@@ -10,6 +10,12 @@ readme = "README.md"
 requires-python = ">=3.10"
 dependencies = ["pandas-market-calendars>=5.0,<6", "PyYAML>=6.0"]
 
+[dependency-groups]
+dev = [
+    "pytest==8.1.1",
+    "ruff==0.14.13",
+]
+
 [tool.setuptools.packages.find]
 where = ["src"]
 
