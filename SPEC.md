@@ -312,6 +312,7 @@ CREATE TABLE silver.raw_objects (
     body_jsonb    jsonb,
     body_raw      bytea,
     raw_hash      text NOT NULL,           -- sha256 of body
+    metadata      jsonb NOT NULL DEFAULT '{}'::jsonb,
     fetched_at    timestamptz NOT NULL DEFAULT now()
 );
 ```
