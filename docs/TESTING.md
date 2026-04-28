@@ -36,6 +36,7 @@ python scripts/apply_migrations.py --check
 python scripts/seed_available_at_policies.py --check
 python scripts/seed_reference_data.py --check
 python scripts/seed_trading_calendar.py --check
+python scripts/materialize_momentum_12_1.py --check
 python -m pytest
 ruff check .
 ```
