@@ -61,3 +61,14 @@ def test_foundation_migration_does_not_create_later_phase_tables() -> None:
     created_tables = apply_migrations.TABLE_RE.findall(migrations[0].sql)
 
     assert tuple(created_tables) == apply_migrations.FOUNDATION_TABLES
+
+
+def test_raw_objects_metadata_migration_is_additive() -> None:
+    migrations = apply_migrations.check_migrations(ROOT / "db" / "migrations")
+    metadata_migration = migrations[1].sql.lower()
+
+    assert migrations[1].path.name == "002_raw_objects_metadata.sql"
+    assert "alter table silver.raw_objects" in metadata_migration
+    assert "add column metadata jsonb not null default '{}'::jsonb" in " ".join(
+        metadata_migration.split()
+    )
