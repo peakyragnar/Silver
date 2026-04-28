@@ -1,7 +1,7 @@
 ---
 tracker:
   kind: linear
-  project_slug: "silver-6bb30c3143d2"
+  project_slug: "silver-af92bd962fcf"
   active_states:
     - Todo
     - In Progress

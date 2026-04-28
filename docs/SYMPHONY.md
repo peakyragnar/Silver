@@ -16,8 +16,8 @@ Silver is prepared to be run by the local Symphony checkout at
 [`../WORKFLOW.md`](../WORKFLOW.md) is wired to the Linear project:
 
 - Project: Silver
-- URL: `https://linear.app/zilent/project/silver-6bb30c3143d2`
-- Slug: `silver-6bb30c3143d2`
+- URL: `https://linear.app/arrow1/project/silver-af92bd962fcf`
+- Slug: `silver-af92bd962fcf`
 
 If the Linear project changes, edit [`../WORKFLOW.md`](../WORKFLOW.md):
 
