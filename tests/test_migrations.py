@@ -72,3 +72,39 @@ def test_raw_objects_metadata_migration_is_additive() -> None:
     assert "add column metadata jsonb not null default '{}'::jsonb" in " ".join(
         metadata_migration.split()
     )
+
+
+def test_phase1_analytics_migration_static_schema_expectations() -> None:
+    migrations = apply_migrations.check_migrations(ROOT / "db" / "migrations")
+    phase1 = migrations[2]
+    sql = " ".join(phase1.sql.lower().split())
+
+    assert phase1.path.name == "003_phase1_analytics.sql"
+    for table in apply_migrations.PHASE1_ANALYTICS_TABLES:
+        assert f"create table silver.{table}" in sql
+
+    assert "primary key (security_id, date)" in sql
+    assert "unique (name, version)" in sql
+    assert "unique (security_id, asof_date, feature_definition_id)" in sql
+    assert "unique (security_id, label_date, horizon_days, label_version)" in sql
+    assert "check (horizon_days in (5, 21, 63, 126, 252))" in sql
+
+
+def test_phase1_analytics_migration_enforces_pit_and_reproducibility() -> None:
+    migrations = apply_migrations.check_migrations(ROOT / "db" / "migrations")
+    sql = " ".join(migrations[2].sql.lower().split())
+
+    for table in (
+        "prices_daily",
+        "feature_values",
+        "forward_return_labels",
+    ):
+        body = apply_migrations._table_body(migrations[2].sql, table).lower()
+        assert "available_at timestamptz not null" in " ".join(body.split())
+        assert "available_at_policy_id bigint not null" in " ".join(body.split())
+
+    assert "references silver.raw_objects(id)" in sql
+    assert "references silver.analytics_runs(id)" in sql
+    assert "feature_definitions_immutable_when_referenced" in sql
+    assert "code_git_sha text not null" in sql
+    assert "available_at_policy_versions jsonb not null" in sql

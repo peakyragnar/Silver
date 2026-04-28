@@ -84,6 +84,95 @@ FOUNDATION_COLUMNS = {
         "notes",
     ),
 }
+PHASE1_ANALYTICS_MIGRATION = "003_phase1_analytics.sql"
+PHASE1_ANALYTICS_TABLES = (
+    "analytics_runs",
+    "prices_daily",
+    "feature_definitions",
+    "feature_values",
+    "forward_return_labels",
+)
+PHASE1_ANALYTICS_COLUMNS = {
+    "analytics_runs": (
+        "run_kind",
+        "code_git_sha",
+        "feature_set_hash",
+        "available_at_policy_versions",
+        "parameters",
+        "input_fingerprints",
+        "random_seed",
+        "started_at",
+        "finished_at",
+        "status",
+    ),
+    "prices_daily": (
+        "security_id",
+        "date",
+        "open",
+        "high",
+        "low",
+        "close",
+        "adj_close",
+        "volume",
+        "currency",
+        "source_system",
+        "normalization_version",
+        "available_at",
+        "available_at_policy_id",
+        "raw_object_id",
+        "normalized_by_run_id",
+        "created_at",
+    ),
+    "feature_definitions": (
+        "name",
+        "version",
+        "kind",
+        "computation_spec",
+        "definition_hash",
+        "notes",
+        "created_at",
+    ),
+    "feature_values": (
+        "security_id",
+        "asof_date",
+        "feature_definition_id",
+        "value",
+        "available_at",
+        "available_at_policy_id",
+        "computed_by_run_id",
+        "computed_at",
+        "source_metadata",
+    ),
+    "forward_return_labels": (
+        "security_id",
+        "label_date",
+        "horizon_days",
+        "horizon_date",
+        "horizon_close_at",
+        "label_version",
+        "start_adj_close",
+        "end_adj_close",
+        "realized_raw_return",
+        "benchmark_security_id",
+        "realized_excess_return",
+        "available_at",
+        "available_at_policy_id",
+        "computed_by_run_id",
+        "computed_at",
+        "metadata",
+    ),
+}
+PHASE1_ANALYTICS_REQUIRED_SNIPPETS = (
+    "primary key (security_id, date)",
+    "unique (name, version)",
+    "unique (security_id, asof_date, feature_definition_id)",
+    "unique (security_id, label_date, horizon_days, label_version)",
+    "check (horizon_days in (5, 21, 63, 126, 252))",
+    "references silver.raw_objects(id)",
+    "references silver.available_at_policies(id)",
+    "references silver.feature_definitions(id) on delete restrict",
+    "feature_definitions_immutable_when_referenced",
+)
 
 
 class MigrationError(RuntimeError):
@@ -171,6 +260,37 @@ def validate_static_schema(migrations: Sequence[Migration]) -> None:
         body = _table_body(sql, temporal_table)
         if "valid_from" not in body.lower() or "valid_to" not in body.lower():
             raise MigrationError(f"silver.{temporal_table} must carry valid ranges")
+
+    if len(migrations) >= 3:
+        validate_phase1_analytics_schema(migrations[2])
+
+
+def validate_phase1_analytics_schema(migration: Migration) -> None:
+    if migration.path.name != PHASE1_ANALYTICS_MIGRATION:
+        raise MigrationError(
+            f"third migration must be db/migrations/{PHASE1_ANALYTICS_MIGRATION}"
+        )
+
+    sql = migration.sql
+    tables = tuple(match.lower() for match in TABLE_RE.findall(sql))
+    if tables != PHASE1_ANALYTICS_TABLES:
+        raise MigrationError(
+            f"{PHASE1_ANALYTICS_MIGRATION} must create exactly the Phase 1 "
+            f"analytics tables {PHASE1_ANALYTICS_TABLES}; found {tables}"
+        )
+
+    for table, columns in PHASE1_ANALYTICS_COLUMNS.items():
+        body = _table_body(sql, table)
+        for column in columns:
+            if not re.search(rf"\b{re.escape(column)}\b", body, re.I):
+                raise MigrationError(f"silver.{table} is missing column {column}")
+
+    normalized_sql = _normalize_sql(sql)
+    for snippet in PHASE1_ANALYTICS_REQUIRED_SNIPPETS:
+        if snippet not in normalized_sql:
+            raise MigrationError(
+                f"{PHASE1_ANALYTICS_MIGRATION} is missing required SQL: {snippet}"
+            )
 
 
 def check_migrations(migrations_dir: Path = DEFAULT_MIGRATIONS_DIR) -> list[Migration]:
