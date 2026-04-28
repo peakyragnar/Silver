@@ -108,3 +108,73 @@ def test_phase1_analytics_migration_enforces_pit_and_reproducibility() -> None:
     assert "feature_definitions_immutable_when_referenced" in sql
     assert "code_git_sha text not null" in sql
     assert "available_at_policy_versions jsonb not null" in sql
+
+
+def test_backtest_metadata_migration_static_schema_expectations() -> None:
+    migrations = apply_migrations.check_migrations(ROOT / "db" / "migrations")
+    phase2 = migrations[3]
+    sql = " ".join(phase2.sql.lower().split())
+
+    assert phase2.path.name == "004_backtest_metadata.sql"
+    assert len(migrations) == 4
+    for table in apply_migrations.PHASE2_BACKTEST_METADATA_TABLES:
+        assert f"create table silver.{table}" in sql
+
+    assert "references silver.model_runs(id) on delete restrict" in sql
+    assert "unique (model_run_key)" in sql
+    assert "unique (backtest_run_key)" in sql
+    assert "horizon_days integer not null" in sql
+    assert "target_kind text not null" in sql
+    assert "random_seed integer not null" in sql
+    assert "cost_assumptions jsonb not null default '{}'::jsonb" in sql
+    assert "metrics_by_regime jsonb not null default '{}'::jsonb" in sql
+    assert "label_scramble_pass boolean" in sql
+
+
+def test_backtest_metadata_migration_enforces_reproducibility_constraints() -> None:
+    migrations = apply_migrations.check_migrations(ROOT / "db" / "migrations")
+    sql = " ".join(migrations[3].sql.lower().split())
+
+    model_body = apply_migrations._table_body(migrations[3].sql, "model_runs")
+    backtest_body = apply_migrations._table_body(migrations[3].sql, "backtest_runs")
+    normalized_model = " ".join(model_body.lower().split())
+    normalized_backtest = " ".join(backtest_body.lower().split())
+
+    for body, run_key in (
+        (normalized_model, "model_run_key"),
+        (normalized_backtest, "backtest_run_key"),
+    ):
+        assert f"check (btrim({run_key}) <> '')" in body
+        assert "check (jsonb_typeof(cost_assumptions) = 'object')" in body
+        assert "check (jsonb_typeof(parameters) = 'object')" in body
+        assert "check (jsonb_typeof(metrics) = 'object')" in body
+        assert "check (finished_at is null or finished_at >= started_at)" in body
+        assert "check ((status = 'running') = (finished_at is null))" in body
+
+    assert "check (code_git_sha ~ '^[0-9a-f]{7,64}$')" in normalized_model
+    assert "check (feature_set_hash ~ '^[0-9a-f]{64}$')" in normalized_model
+    assert "check (training_end_date >= training_start_date)" in normalized_model
+    assert "check (test_end_date >= test_start_date)" in normalized_model
+    assert "check (test_start_date > training_end_date)" in normalized_model
+    assert "check (random_seed >= 0)" in normalized_model
+    assert "check (jsonb_typeof(available_at_policy_versions) = 'object')" in (
+        normalized_model
+    )
+    assert "check (jsonb_typeof(input_fingerprints) = 'object')" in normalized_model
+
+    assert "check (btrim(universe_name) <> '')" in normalized_backtest
+    assert "check (jsonb_typeof(metrics_by_regime) = 'object')" in normalized_backtest
+    assert "check (jsonb_typeof(baseline_metrics) = 'object')" in normalized_backtest
+    assert "check (jsonb_typeof(label_scramble_metrics) = 'object')" in (
+        normalized_backtest
+    )
+    assert (
+        "check ( status not in ('succeeded', 'insufficient_data') "
+        "or label_scramble_pass is not null )"
+    ) in (
+        normalized_backtest
+    )
+    assert "check (horizon_days in (5, 21, 63, 126, 252))" in sql
+    assert "check (status in ('running', 'succeeded', 'failed', 'insufficient_data'))" in (
+        sql
+    )
