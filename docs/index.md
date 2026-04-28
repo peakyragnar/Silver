@@ -11,6 +11,8 @@ and humans building Silver.
   an AI-native investment learning environment
 - [`PIT_DISCIPLINE.md`](PIT_DISCIPLINE.md): time, `available_at`, and lookahead
   rules
+- [`PHASE1_RUNBOOK.md`](PHASE1_RUNBOOK.md): local Phase 1 preflight and
+  falsifier runbook
 - [`TESTING.md`](TESTING.md): validation ladder and phase gates
 - [`SECURITY.md`](SECURITY.md): secrets, vendor data, and local environment
 - [`SYMPHONY.md`](SYMPHONY.md): how to run Symphony against this repository
