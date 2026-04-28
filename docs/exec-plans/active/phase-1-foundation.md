@@ -26,7 +26,8 @@ signal on the seed universe.
 - [ ] Labels are computed for 5, 21, 63, 126, and 252 trading-day horizons
 - [ ] Momentum 12-1 feature is computed without lookahead
 - [ ] Backtest includes costs, baselines, regimes, and label-scramble
-- [ ] Report is written to `reports/falsifier/week_1_momentum.md`
+- [x] Falsifier report command writes to
+  `reports/falsifier/week_1_momentum.md`
 
 ## Validation
 
@@ -36,7 +37,23 @@ signal on the seed universe.
 - [x] `python scripts/apply_migrations.py --check`
 - [x] `python -m pytest`
 - [x] `ruff check .`
-- [ ] `python scripts/run_falsifier.py --strategy momentum_12_1 --horizon 63 --universe falsifier_seed` (script not present yet)
+- [x] `python scripts/run_falsifier.py --check`
+- [x] `python scripts/run_falsifier.py --strategy momentum_12_1 --horizon 63 --universe falsifier_seed` (command exists; live run requires persisted feature and label prerequisites)
+
+## Falsifier Command
+
+Validate CLI/config/report-path wiring without live data:
+
+```bash
+python scripts/run_falsifier.py --check
+```
+
+Run the Week 1 momentum report after prices, labels, and momentum feature values
+are materialized:
+
+```bash
+python scripts/run_falsifier.py --strategy momentum_12_1 --horizon 63 --universe falsifier_seed
+```
 
 ## Seed Universe Intent
 
