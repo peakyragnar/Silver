@@ -34,6 +34,7 @@ signal on the seed universe.
 - [x] `python scripts/seed_reference_data.py --check`
 - [x] `python scripts/seed_trading_calendar.py --check`
 - [x] `python scripts/apply_migrations.py --check`
+- [x] `python scripts/materialize_forward_labels.py --check`
 - [x] `python -m pytest`
 - [x] `ruff check .`
 - [ ] `python scripts/run_falsifier.py --strategy momentum_12_1 --horizon 63 --universe falsifier_seed` (script not present yet)
