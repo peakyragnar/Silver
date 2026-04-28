@@ -42,6 +42,38 @@ python scripts/seed_available_at_policies.py
 The seed command reads `DATABASE_URL` from the environment unless
 `--database-url` is provided.
 
+## Trading Calendar
+
+Phase 1 US equity sessions are configured in `config/trading_calendar.yaml` and
+seeded from `db/seed/trading_calendar.csv`. The seed file covers every calendar
+date from 2014-01-01 through 2026-12-31; weekends and market holidays are
+explicit `is_session = false` rows so missing dates fail closed instead of
+becoming silent calendar-day approximations.
+
+Generate or refresh the deterministic seed CSV:
+
+```bash
+python scripts/seed_trading_calendar.py --write-seed
+```
+
+Validate the config, generated rows, and checked-in seed CSV without a live
+database:
+
+```bash
+python scripts/seed_trading_calendar.py --check
+```
+
+Seed or update `silver.trading_calendar` after migrations are applied:
+
+```bash
+python scripts/seed_trading_calendar.py
+```
+
+The calendar uses `pandas_market_calendars` with the `XNYS` calendar. Early
+closes are represented with `is_early_close = true` and the UTC
+`session_close` timestamp; intraday microstructure beyond the close timestamp
+is out of scope for Phase 1.
+
 ## Test Expectations
 
 Add tests that deliberately attempt to use future data and assert rejection.

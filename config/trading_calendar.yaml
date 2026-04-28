@@ -1,0 +1,10 @@
+calendar_set_version: 1
+calendar:
+  name: us_equity
+  source: pandas_market_calendars
+  market: XNYS
+  timezone: America/New_York
+  start_date: "2014-01-01"
+  end_date: "2026-12-31"
+  canonical_horizons: [5, 21, 63, 126, 252]
+  early_close_rule: session_close_before_16_00_local
