@@ -140,7 +140,8 @@ def test_check_config_uses_seed_reference_data() -> None:
         today=date(2026, 4, 28),
     )
 
-    assert "5 seed ticker(s): AAPL, GOOGL, JPM, MSFT, NVDA" in message
+    assert "45 seed ticker(s): AAPL, ABBV, ADBE" in message
+    assert "UPS, V, WFC, WMT, XOM" in message
     assert "2014-04-03..2026-04-28" in message
 
 

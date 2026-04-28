@@ -813,7 +813,7 @@ The next tickets should build Silver Gym v0:
 2. Seed initial securities and falsifier universe.
 3. Add trading calendar.
 4. Add raw vault writer.
-5. Add FMP daily prices ingest for a tiny universe.
+5. Add FMP daily prices ingest for the falsifier seed universe.
 6. Compute 5, 21, 63, 126, and 252 trading-day labels.
 7. Compute 12-1 momentum.
 8. Add first falsifier command.

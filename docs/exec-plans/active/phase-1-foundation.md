@@ -19,7 +19,7 @@ signal on the seed universe.
 - [ ] `pyproject.toml` defines the local Python package and test tooling
 - [ ] `db/migrations/001_foundation.sql` creates core schema objects
 - [x] Trading calendar is seeded for 2014-2026
-- [x] Seed universe contains NVDA, MSFT, AAPL, GOOGL, and JPM
+- [x] Seed universe contains 45 liquid equities across major non-REIT sectors
 - [ ] Prices can be ingested for the seed universe
 - [x] Phase 1 analytics migration defines normalized prices, forward labels,
   versioned numeric features, and minimal analytics run metadata
@@ -75,16 +75,19 @@ python scripts/run_falsifier.py --strategy momentum_12_1 --horizon 63 --universe
 
 ## Seed Universe Intent
 
-The initial `falsifier_seed` universe is a tiny liquid cross-sector plumbing set:
-NVDA, MSFT, AAPL, GOOGL, and JPM. Membership is point-in-time in
-`config/seed_reference_data.yaml` and starts on `2014-04-03` for this seed
-interval.
+The `falsifier_seed` universe is a 45-security liquid cross-sector falsifier
+set. Membership is point-in-time in `config/seed_reference_data.yaml` and starts
+on `2014-04-03` for this seed interval. It spans information technology,
+communication services, consumer discretionary, consumer staples, health care,
+financials, industrials, energy, materials, and utilities while excluding ETFs,
+REITs, options, futures, crypto, and foreign ordinary shares.
 
-JPM is included only to make early plumbing exercise a financial-sector equity.
-Broad securities schema support does not mean early feature parity for banks or
-REITs. Bank-specific fundamental features, REIT-specific features, and any
-generic assumption that treats financials and REITs like industrial/software
-businesses remain out of scope; no REIT is in the seed universe.
+Financials such as JPM, BAC, WFC, GS, V, and MA are included only to make the
+falsifier exercise cross-sector equity plumbing. Broad securities schema support
+does not mean early feature parity for banks or REITs. Bank-specific
+fundamental features, REIT-specific features, and any generic assumption that
+treats financials and REITs like industrial/software businesses remain out of
+scope; no REIT is in the seed universe.
 
 ## Suggested Ticket Breakdown
 

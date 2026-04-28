@@ -16,7 +16,55 @@ import yaml
 ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_CONFIG_PATH = ROOT / "config" / "seed_reference_data.yaml"
 FALSIFIER_UNIVERSE_NAME = "falsifier_seed"
-REQUIRED_FALSIFIER_TICKERS = frozenset({"AAPL", "GOOGL", "JPM", "MSFT", "NVDA"})
+REQUIRED_FALSIFIER_TICKERS = frozenset(
+    {
+        "AAPL",
+        "ABBV",
+        "ADBE",
+        "AMGN",
+        "AMZN",
+        "APD",
+        "BAC",
+        "CAT",
+        "COP",
+        "COST",
+        "CRM",
+        "CSCO",
+        "CVX",
+        "DE",
+        "FCX",
+        "GOOGL",
+        "GS",
+        "HD",
+        "INTC",
+        "JNJ",
+        "JPM",
+        "KO",
+        "LLY",
+        "LOW",
+        "MA",
+        "MCD",
+        "MRK",
+        "MSFT",
+        "NEE",
+        "NFLX",
+        "NKE",
+        "NVDA",
+        "ORCL",
+        "PEP",
+        "PFE",
+        "PG",
+        "QCOM",
+        "SBUX",
+        "UNH",
+        "UNP",
+        "UPS",
+        "V",
+        "WFC",
+        "WMT",
+        "XOM",
+    }
+)
 TICKER_RE = re.compile(r"^[A-Z][A-Z0-9.]{0,9}$")
 CIK_RE = re.compile(r"^\d{10}$")
 FISCAL_YEAR_END_RE = re.compile(r"^\d{2}-\d{2}$")
@@ -325,7 +373,7 @@ def _validate_membership(raw_membership: object, index: int) -> UniverseMembersh
     valid_to = _optional_date(raw_membership, "valid_to", context)
     if valid_to is not None and valid_to < valid_from:
         raise SeedValidationError(f"{context} valid_to must be on or after valid_from")
-    reason = _optional_str(raw_membership, "reason", context)
+    reason = _required_str(raw_membership, "reason", context)
 
     return UniverseMembershipSeed(
         universe_name=universe_name,
