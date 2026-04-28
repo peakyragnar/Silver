@@ -1,0 +1,99 @@
+seed_set_version: 1
+description: Initial securities and point-in-time falsifier universe membership.
+securities:
+  - ticker: AAPL
+    name: Apple Inc.
+    cik: "0000320193"
+    exchange: NASDAQ
+    asset_class: equity
+    country: US
+    currency: USD
+    identifiers:
+      - type: ticker
+        identifier: AAPL
+        valid_from: "2014-04-03"
+      - type: cik
+        identifier: "0000320193"
+        valid_from: "2014-04-03"
+
+  - ticker: GOOGL
+    name: Alphabet Inc. Class A
+    cik: "0001652044"
+    exchange: NASDAQ
+    asset_class: equity
+    country: US
+    currency: USD
+    identifiers:
+      - type: ticker
+        identifier: GOOGL
+        valid_from: "2014-04-03"
+      - type: cik
+        identifier: "0001652044"
+        valid_from: "2014-04-03"
+
+  - ticker: JPM
+    name: "JPMorgan Chase & Co."
+    cik: "0000019617"
+    exchange: NYSE
+    asset_class: equity
+    country: US
+    currency: USD
+    identifiers:
+      - type: ticker
+        identifier: JPM
+        valid_from: "2014-04-03"
+      - type: cik
+        identifier: "0000019617"
+        valid_from: "2014-04-03"
+
+  - ticker: MSFT
+    name: Microsoft Corporation
+    cik: "0000789019"
+    exchange: NASDAQ
+    asset_class: equity
+    country: US
+    currency: USD
+    identifiers:
+      - type: ticker
+        identifier: MSFT
+        valid_from: "2014-04-03"
+      - type: cik
+        identifier: "0000789019"
+        valid_from: "2014-04-03"
+
+  - ticker: NVDA
+    name: NVIDIA Corporation
+    cik: "0001045810"
+    exchange: NASDAQ
+    asset_class: equity
+    country: US
+    currency: USD
+    identifiers:
+      - type: ticker
+        identifier: NVDA
+        valid_from: "2014-04-03"
+      - type: cik
+        identifier: "0001045810"
+        valid_from: "2014-04-03"
+
+universe_memberships:
+  - universe_name: falsifier_seed
+    ticker: AAPL
+    valid_from: "2014-04-03"
+    reason: Initial liquid cross-sector plumbing sanity seed.
+  - universe_name: falsifier_seed
+    ticker: GOOGL
+    valid_from: "2014-04-03"
+    reason: Initial liquid cross-sector plumbing sanity seed.
+  - universe_name: falsifier_seed
+    ticker: JPM
+    valid_from: "2014-04-03"
+    reason: Liquid financial-sector plumbing sanity check; not feature parity.
+  - universe_name: falsifier_seed
+    ticker: MSFT
+    valid_from: "2014-04-03"
+    reason: Initial liquid cross-sector plumbing sanity seed.
+  - universe_name: falsifier_seed
+    ticker: NVDA
+    valid_from: "2014-04-03"
+    reason: Initial liquid cross-sector plumbing sanity seed.

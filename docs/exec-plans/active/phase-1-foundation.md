@@ -19,7 +19,7 @@ signal on the seed universe.
 - [ ] `pyproject.toml` defines the local Python package and test tooling
 - [ ] `db/migrations/001_foundation.sql` creates core schema objects
 - [x] Trading calendar is seeded for 2014-2026
-- [ ] Seed universe contains NVDA, MSFT, AAPL, GOOGL, and JPM
+- [x] Seed universe contains NVDA, MSFT, AAPL, GOOGL, and JPM
 - [ ] Prices can be ingested for the seed universe
 - [ ] Labels are computed for 5, 21, 63, 126, and 252 trading-day horizons
 - [ ] Momentum 12-1 feature is computed without lookahead
@@ -29,11 +29,25 @@ signal on the seed universe.
 ## Validation
 
 - [x] `git diff --check`
+- [x] `python scripts/seed_reference_data.py --check`
 - [x] `python scripts/seed_trading_calendar.py --check`
 - [x] `python scripts/apply_migrations.py --check`
 - [x] `python -m pytest`
 - [x] `ruff check .`
 - [ ] `python scripts/run_falsifier.py --strategy momentum_12_1 --horizon 63 --universe falsifier_seed` (script not present yet)
+
+## Seed Universe Intent
+
+The initial `falsifier_seed` universe is a tiny liquid cross-sector plumbing set:
+NVDA, MSFT, AAPL, GOOGL, and JPM. Membership is point-in-time in
+`config/seed_reference_data.yaml` and starts on `2014-04-03` for this seed
+interval.
+
+JPM is included only to make early plumbing exercise a financial-sector equity.
+Broad securities schema support does not mean early feature parity for banks or
+REITs. Bank-specific fundamental features, REIT-specific features, and any
+generic assumption that treats financials and REITs like industrial/software
+businesses remain out of scope; no REIT is in the seed universe.
 
 ## Suggested Ticket Breakdown
 
