@@ -31,6 +31,8 @@ If the Linear project changes, edit [`../WORKFLOW.md`](../WORKFLOW.md):
 - Keep the workspace root outside this repository.
 - Keep `Human Review` as a non-active Linear state so completed PRs stop being
   picked up by Symphony while they wait for Michael's review.
+- Keep `Merging` as a non-active Linear state. It is handled by the lightweight
+  merge steward script instead of a full Codex worker.
 
 ## Linear State Machine
 
@@ -43,14 +45,15 @@ Silver uses Linear as the Symphony control plane:
 | `In Progress` | Yes | Agent is implementing the ticket. |
 | `Rework` | Yes | Human or CI requested changes; agent should repair the PR. |
 | `Human Review` | No | Agent has posted a proof packet and is waiting for Michael. |
-| `Merging` | Yes | Michael approved; agent should queue/merge and then mark done. |
+| `Merging` | No | Michael approved; lightweight merge steward queues/marks done. |
 | `Done` | No | Complete. |
 | `Canceled` / `Duplicate` | No | Terminal non-work states. |
 
 The key rule is that agents do not mark their own implementation work `Done`.
 They move implementation tickets to `Human Review` with evidence. Michael moves
-approved tickets to `Merging`; a merge-steward agent then handles GitHub merge
-queue and marks the issue `Done` after the PR lands.
+approved tickets to `Merging`; the lightweight merge steward handles GitHub
+merge queue and marks the issue `Done` after the PR lands. Only conflicts or
+failed checks move back to `Rework` for Codex.
 
 ## Proof Packets
 
@@ -103,6 +106,41 @@ Stop:
 ```bash
 tmux kill-session -t silver-symphony
 ```
+
+## Merge Steward
+
+Run the merge steward in the Silver repository shell where `LINEAR_API_KEY` is
+available. It reads Linear issues in `Merging`, finds the matching GitHub PR,
+queues green PRs, marks merged PRs `Done`, and sends conflicts or failed checks
+to `Rework`.
+
+Validate local wiring without network writes:
+
+```bash
+python scripts/merge_steward.py --check
+```
+
+Preview current actions:
+
+```bash
+python scripts/merge_steward.py --dry-run
+```
+
+Keep it running while reviewing batches:
+
+```bash
+tmux kill-session -t silver-merge-steward 2>/dev/null || true
+tmux new-session -d -s silver-merge-steward '
+  set -a
+  source /Users/michael/Silver/.env
+  set +a
+  cd /Users/michael/Silver
+  uv run python scripts/merge_steward.py --watch --poll-interval 30
+'
+```
+
+The steward is deterministic on purpose. It does not edit code. It only queues,
+waits, marks `Done`, or routes exceptions to `Rework`.
 
 ## First Tickets
 

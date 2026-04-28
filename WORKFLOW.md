@@ -6,7 +6,6 @@ tracker:
     - Todo
     - In Progress
     - Rework
-    - Merging
   terminal_states:
     - Done
     - Canceled
@@ -78,9 +77,8 @@ No description provided.
 - `Rework`: resume from review feedback, repair the existing PR, refresh the
   proof packet, then move back to `Human Review`.
 - `Human Review`: wait for human review; do not code.
-- `Merging`: do not add new scope. Act as merge steward: verify the approved PR,
-  update/rebase only if required, rerun failed or stale checks, add the PR to
-  GitHub merge queue, confirm it lands on `main`, then move the issue to `Done`.
+- `Merging`: wait for the lightweight merge steward; do not start a Codex
+  worker from Symphony for this state.
 - `Done`: terminal; stop.
 - `Canceled`: terminal; stop.
 - `Duplicate`: terminal; stop.
@@ -118,17 +116,20 @@ Michael enough evidence to approve, reject, or move the issue to `Rework`.
 
 ## Merge Steward Rules
 
-When current status is `Merging`:
+The `Merging` state is intentionally not in `tracker.active_states`. It is
+handled by [`scripts/merge_steward.py`](scripts/merge_steward.py), not a full
+Codex worker.
+
+When a ticket is in `Merging`, the lightweight steward must:
 
 1. Find the PR associated with the Linear issue identifier.
 2. Confirm the PR still matches the approved scope and has passing required
    checks.
-3. If GitHub requires an update, perform the smallest branch update and rerun
-   validation.
-4. Add the PR to GitHub merge queue; do not bypass the queue.
-5. After merge, pull/verify `origin/main` contains the merge commit when
-   practical.
-6. Move the Linear issue to `Done` and post a short merge confirmation.
+3. Add the PR to GitHub merge queue; do not bypass the queue.
+4. After merge, move the Linear issue to `Done` and post a short merge
+   confirmation.
+5. Move failed checks or merge conflicts to `Rework` so Codex handles only the
+   exception path.
 
 ## Silver-Specific Quality Bar
 
