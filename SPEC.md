@@ -656,6 +656,8 @@ Computed deterministically from `prices_daily` + `fundamental_facts` + `corporat
 
 Examples:
 - `momentum_12_1` — return from t-252d to t-21d, excluding most recent 21 days
+- `avg_dollar_volume_63` — average `adj_close * volume` over trailing 63 visible
+  daily price rows
 - `volatility_30d` — annualized stdev of daily log returns over trailing 30 days
 - `revenue_growth_yoy` — TTM revenue / prior-TTM revenue minus 1
 - `gross_margin_change_yoy` — current TTM gross margin minus prior TTM gross margin
