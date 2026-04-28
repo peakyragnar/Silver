@@ -8,7 +8,11 @@ version = "0.1.0"
 description = "Point-in-time prediction and backtesting system for US equities."
 readme = "README.md"
 requires-python = ">=3.10"
-dependencies = ["pandas-market-calendars>=5.0,<6", "PyYAML>=6.0"]
+dependencies = [
+    "pandas-market-calendars>=5.0,<6",
+    "psycopg[binary]>=3.2,<4",
+    "PyYAML>=6.0",
+]
 
 [dependency-groups]
 dev = [
