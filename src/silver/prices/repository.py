@@ -15,6 +15,9 @@ from silver.prices.daily import DailyPriceRow
 
 
 DAILY_PRICE_POLICY_NAME = "daily_price"
+DEFAULT_DAILY_PRICE_POLICY_VERSION = 1
+DEFAULT_NORMALIZATION_VERSION = "fmp_daily_prices_v1"
+DEFAULT_PRICE_CURRENCY = "USD"
 
 
 class DailyPricePersistenceError(ValueError):
@@ -31,10 +34,14 @@ class DailyPriceWriteResult:
     source: str
     raw_object_id: int
     available_at_policy_id: int
+    normalized_by_run_id: int
+    normalization_version: str
 
 
 @dataclass(frozen=True, slots=True)
-class _AvailableAtPolicyRecord:
+class DailyPricePolicy:
+    """Available-at policy metadata used for daily-price normalization."""
+
     id: int
     name: str
     version: int
@@ -58,6 +65,9 @@ class DailyPriceRepository:
         raw_object_id: int,
         source: str,
         available_at_policy_id: int,
+        normalized_by_run_id: int,
+        normalization_version: str = DEFAULT_NORMALIZATION_VERSION,
+        currency: str = DEFAULT_PRICE_CURRENCY,
     ) -> DailyPriceWriteResult:
         """Persist already-parsed daily-price rows with PIT and raw lineage."""
         normalized_rows = _validated_rows(rows)
@@ -67,6 +77,15 @@ class DailyPriceRepository:
             available_at_policy_id,
             "available_at_policy_id",
         )
+        normalized_run_id = _positive_int(
+            normalized_by_run_id,
+            "normalized_by_run_id",
+        )
+        normalized_version = _required_label(
+            normalization_version,
+            "normalization_version",
+        )
+        normalized_currency = _required_label(currency, "currency").upper()
 
         if not normalized_rows:
             return DailyPriceWriteResult(
@@ -76,6 +95,8 @@ class DailyPriceRepository:
                 source=normalized_source,
                 raw_object_id=normalized_raw_object_id,
                 available_at_policy_id=normalized_policy_id,
+                normalized_by_run_id=normalized_run_id,
+                normalization_version=normalized_version,
             )
 
         _validate_row_sources(normalized_rows, normalized_source)
@@ -85,18 +106,20 @@ class DailyPriceRepository:
         security_ids = self._load_security_ids(tickers)
         self._require_trading_sessions(dates)
 
-        seen_keys: set[tuple[int, date, str, int]] = set()
-        ordered_rows = sorted(normalized_rows, key=lambda row: (_ticker(row.ticker), row.date))
+        seen_keys: set[tuple[int, date]] = set()
+        ordered_rows = sorted(
+            normalized_rows,
+            key=lambda row: (_ticker(row.ticker), row.date),
+        )
         for row in ordered_rows:
             _validate_numeric_row(row)
             ticker = _ticker(row.ticker)
             security_id = security_ids[ticker]
-            key = (security_id, row.date, normalized_source, normalized_raw_object_id)
+            key = (security_id, row.date)
             if key in seen_keys:
                 raise DailyPricePersistenceError(
                     "duplicate daily price row for "
-                    f"{ticker} on {row.date.isoformat()} from {normalized_source} "
-                    f"raw_object_id {normalized_raw_object_id}"
+                    f"{ticker} on {row.date.isoformat()}"
                 )
             seen_keys.add(key)
 
@@ -109,10 +132,13 @@ class DailyPriceRepository:
                 "close": row.close,
                 "adj_close": row.adj_close,
                 "volume": row.volume,
+                "currency": normalized_currency,
+                "source_system": normalized_source,
+                "normalization_version": normalized_version,
                 "available_at": daily_price_available_at(row.date, policy.rule),
                 "available_at_policy_id": policy.id,
                 "raw_object_id": normalized_raw_object_id,
-                "source": normalized_source,
+                "normalized_by_run_id": normalized_run_id,
             }
             with _cursor(self._connection) as cursor:
                 cursor.execute(_UPSERT_DAILY_PRICE_SQL, params)
@@ -124,12 +150,39 @@ class DailyPriceRepository:
             source=normalized_source,
             raw_object_id=normalized_raw_object_id,
             available_at_policy_id=policy.id,
+            normalized_by_run_id=normalized_run_id,
+            normalization_version=normalized_version,
         )
+
+    def load_daily_price_policy(
+        self,
+        *,
+        version: int = DEFAULT_DAILY_PRICE_POLICY_VERSION,
+    ) -> DailyPricePolicy:
+        """Load the configured daily-price policy by version."""
+        normalized_version = _positive_int(version, "version")
+        with _cursor(self._connection) as cursor:
+            cursor.execute(
+                _SELECT_POLICY_BY_NAME_VERSION_SQL,
+                {
+                    "name": DAILY_PRICE_POLICY_NAME,
+                    "version": normalized_version,
+                },
+            )
+            row = cursor.fetchone()
+        if row is None:
+            raise DailyPricePersistenceError(
+                f"{DAILY_PRICE_POLICY_NAME} policy version "
+                f"{normalized_version} was not found"
+            )
+        policy = _policy_record(row)
+        _validate_daily_price_rule(policy.rule)
+        return policy
 
     def _load_daily_price_policy(
         self,
         available_at_policy_id: int,
-    ) -> _AvailableAtPolicyRecord:
+    ) -> DailyPricePolicy:
         with _cursor(self._connection) as cursor:
             cursor.execute(
                 _SELECT_POLICY_SQL,
@@ -182,7 +235,8 @@ class DailyPriceRepository:
                 )
             if not is_session:
                 raise DailyPricePersistenceError(
-                    f"price date must be a trading session; got {price_date.isoformat()}"
+                    "price date must be a trading session; got "
+                    f"{price_date.isoformat()}"
                 )
 
 
@@ -221,7 +275,8 @@ def _validate_row_sources(rows: Sequence[DailyPriceRow], source: str) -> None:
         row_source = _source(row.source, "row.source")
         if row_source != source:
             raise DailyPricePersistenceError(
-                f"daily price row source {row_source} does not match write source {source}"
+                f"daily price row source {row_source} does not match "
+                f"write source {source}"
             )
 
 
@@ -294,9 +349,13 @@ def _ticker(value: object) -> str:
 
 
 def _source(value: object, name: str) -> str:
+    return _required_label(value, name).lower()
+
+
+def _required_label(value: object, name: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise DailyPricePersistenceError(f"{name} must be a non-empty string")
-    return value.strip().lower()
+    return value.strip()
 
 
 def _positive_int(value: object, name: str) -> int:
@@ -305,7 +364,7 @@ def _positive_int(value: object, name: str) -> int:
     return value
 
 
-def _policy_record(row: object) -> _AvailableAtPolicyRecord:
+def _policy_record(row: object) -> DailyPricePolicy:
     rule = _row_value(row, "rule", 3)
     if isinstance(rule, str):
         try:
@@ -316,7 +375,7 @@ def _policy_record(row: object) -> _AvailableAtPolicyRecord:
             ) from exc
     if not isinstance(rule, Mapping):
         raise DailyPricePersistenceError("available_at policy rule must be a mapping")
-    return _AvailableAtPolicyRecord(
+    return DailyPricePolicy(
         id=_row_int(row, "id", 0, "available_at_policies.id"),
         name=_row_str(row, "name", 1, "available_at_policies.name"),
         version=_row_int(row, "version", 2, "available_at_policies.version"),
@@ -333,7 +392,9 @@ def _row_value(row: object, key: str, index: int) -> Any:
 def _row_int(row: object, key: str, index: int, name: str) -> int:
     value = _row_value(row, key, index)
     if isinstance(value, bool) or not isinstance(value, int):
-        raise DailyPricePersistenceError(f"{name} returned by database must be an integer")
+        raise DailyPricePersistenceError(
+            f"{name} returned by database must be an integer"
+        )
     return value
 
 
@@ -386,6 +447,14 @@ WHERE id = %(available_at_policy_id)s
 LIMIT 1;
 """.strip()
 
+_SELECT_POLICY_BY_NAME_VERSION_SQL = """
+SELECT id, name, version, rule
+FROM silver.available_at_policies
+WHERE name = %(name)s
+  AND version = %(version)s
+LIMIT 1;
+""".strip()
+
 _SELECT_SECURITY_SQL = """
 SELECT id
 FROM silver.securities
@@ -409,10 +478,13 @@ INSERT INTO silver.prices_daily (
     close,
     adj_close,
     volume,
+    currency,
+    source_system,
+    normalization_version,
     available_at,
     available_at_policy_id,
     raw_object_id,
-    source
+    normalized_by_run_id
 ) VALUES (
     %(security_id)s,
     %(date)s,
@@ -422,20 +494,28 @@ INSERT INTO silver.prices_daily (
     %(close)s,
     %(adj_close)s,
     %(volume)s,
+    %(currency)s,
+    %(source_system)s,
+    %(normalization_version)s,
     %(available_at)s,
     %(available_at_policy_id)s,
     %(raw_object_id)s,
-    %(source)s
+    %(normalized_by_run_id)s
 )
-ON CONFLICT (security_id, date, source, raw_object_id) DO UPDATE SET
+ON CONFLICT (security_id, date) DO UPDATE SET
     open = EXCLUDED.open,
     high = EXCLUDED.high,
     low = EXCLUDED.low,
     close = EXCLUDED.close,
     adj_close = EXCLUDED.adj_close,
     volume = EXCLUDED.volume,
+    currency = EXCLUDED.currency,
+    source_system = EXCLUDED.source_system,
+    normalization_version = EXCLUDED.normalization_version,
     available_at = EXCLUDED.available_at,
-    available_at_policy_id = EXCLUDED.available_at_policy_id
+    available_at_policy_id = EXCLUDED.available_at_policy_id,
+    raw_object_id = EXCLUDED.raw_object_id,
+    normalized_by_run_id = EXCLUDED.normalized_by_run_id
 WHERE
     silver.prices_daily.open IS DISTINCT FROM EXCLUDED.open
     OR silver.prices_daily.high IS DISTINCT FROM EXCLUDED.high
@@ -443,7 +523,12 @@ WHERE
     OR silver.prices_daily.close IS DISTINCT FROM EXCLUDED.close
     OR silver.prices_daily.adj_close IS DISTINCT FROM EXCLUDED.adj_close
     OR silver.prices_daily.volume IS DISTINCT FROM EXCLUDED.volume
+    OR silver.prices_daily.currency IS DISTINCT FROM EXCLUDED.currency
+    OR silver.prices_daily.source_system IS DISTINCT FROM EXCLUDED.source_system
+    OR silver.prices_daily.normalization_version IS DISTINCT FROM
+        EXCLUDED.normalization_version
     OR silver.prices_daily.available_at IS DISTINCT FROM EXCLUDED.available_at
     OR silver.prices_daily.available_at_policy_id IS DISTINCT FROM
-        EXCLUDED.available_at_policy_id;
+        EXCLUDED.available_at_policy_id
+    OR silver.prices_daily.raw_object_id IS DISTINCT FROM EXCLUDED.raw_object_id;
 """.strip()

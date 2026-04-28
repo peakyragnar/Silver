@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
     "pandas-market-calendars>=5.0,<6",
-    "psycopg[binary]>=3.1,<4",
+    "psycopg[binary]>=3.2,<4",
     "PyYAML>=6.0",
 ]
 

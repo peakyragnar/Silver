@@ -21,6 +21,12 @@ DAILY_PRICE_RULE = {
     "timezone": "America/New_York",
     "calendar": "NYSE",
 }
+WRITE_KWARGS = {
+    "raw_object_id": 11,
+    "source": "fmp",
+    "available_at_policy_id": 3,
+    "normalized_by_run_id": 29,
+}
 
 
 def test_daily_price_available_at_uses_policy_timezone() -> None:
@@ -51,9 +57,7 @@ def test_write_daily_prices_persists_lineage_and_available_at() -> None:
             _price_row(date(2024, 1, 3), close="184.25"),
             _price_row(date(2024, 1, 2), close="185.64"),
         ],
-        raw_object_id=11,
-        source="fmp",
-        available_at_policy_id=3,
+        **WRITE_KWARGS,
     )
 
     assert result.rows_written == 2
@@ -61,11 +65,15 @@ def test_write_daily_prices_persists_lineage_and_available_at() -> None:
     assert result.dates == (date(2024, 1, 2), date(2024, 1, 3))
     assert result.raw_object_id == 11
     assert result.available_at_policy_id == 3
+    assert result.normalized_by_run_id == 29
+    assert result.normalization_version == "fmp_daily_prices_v1"
 
     rows = sorted(connection.prices_daily.values(), key=lambda row: row["date"])
     assert [row["date"] for row in rows] == [date(2024, 1, 2), date(2024, 1, 3)]
     assert rows[0]["security_id"] == 101
-    assert rows[0]["source"] == "fmp"
+    assert rows[0]["source_system"] == "fmp"
+    assert rows[0]["normalization_version"] == "fmp_daily_prices_v1"
+    assert rows[0]["normalized_by_run_id"] == 29
     assert rows[0]["raw_object_id"] == 11
     assert rows[0]["available_at_policy_id"] == 3
     assert rows[0]["available_at"] == datetime(
@@ -85,15 +93,11 @@ def test_write_daily_prices_is_idempotent_for_same_lineage() -> None:
 
     first = repository.write_daily_prices(
         [row],
-        raw_object_id=11,
-        source="fmp",
-        available_at_policy_id=3,
+        **WRITE_KWARGS,
     )
     second = repository.write_daily_prices(
         [row],
-        raw_object_id=11,
-        source="fmp",
-        available_at_policy_id=3,
+        **WRITE_KWARGS,
     )
 
     assert first == second
@@ -112,6 +116,10 @@ def test_write_daily_prices_is_idempotent_for_same_lineage() -> None:
             {"available_at_policy_id": 0},
             "available_at_policy_id must be a positive integer",
         ),
+        (
+            {"normalized_by_run_id": 0},
+            "normalized_by_run_id must be a positive integer",
+        ),
     ),
 )
 def test_write_daily_prices_rejects_missing_required_lineage(
@@ -119,11 +127,7 @@ def test_write_daily_prices_rejects_missing_required_lineage(
     error: str,
 ) -> None:
     connection = FakeConnection()
-    call_kwargs = {
-        "raw_object_id": 11,
-        "source": "fmp",
-        "available_at_policy_id": 3,
-    }
+    call_kwargs = dict(WRITE_KWARGS)
     call_kwargs.update(kwargs)
 
     with pytest.raises(DailyPricePersistenceError, match=error):
@@ -144,9 +148,7 @@ def test_write_daily_prices_rejects_missing_policy_before_write() -> None:
     ):
         DailyPriceRepository(connection).write_daily_prices(
             [_price_row(date(2024, 1, 2))],
-            raw_object_id=11,
-            source="fmp",
-            available_at_policy_id=3,
+            **WRITE_KWARGS,
         )
 
     assert not connection.prices_daily
@@ -161,9 +163,7 @@ def test_write_daily_prices_rejects_missing_security_before_write() -> None:
     ):
         DailyPriceRepository(connection).write_daily_prices(
             [_price_row(date(2024, 1, 2))],
-            raw_object_id=11,
-            source="fmp",
-            available_at_policy_id=3,
+            **WRITE_KWARGS,
         )
 
     assert not connection.prices_daily
@@ -178,9 +178,7 @@ def test_write_daily_prices_rejects_non_session_date_before_write() -> None:
     ):
         DailyPriceRepository(connection).write_daily_prices(
             [_price_row(date(2024, 1, 6))],
-            raw_object_id=11,
-            source="fmp",
-            available_at_policy_id=3,
+            **WRITE_KWARGS,
         )
 
     assert not connection.prices_daily
@@ -195,9 +193,7 @@ def test_write_daily_prices_rejects_missing_calendar_date_before_write() -> None
     ):
         DailyPriceRepository(connection).write_daily_prices(
             [_price_row(date(2024, 1, 2))],
-            raw_object_id=11,
-            source="fmp",
-            available_at_policy_id=3,
+            **WRITE_KWARGS,
         )
 
     assert not connection.prices_daily
@@ -215,9 +211,19 @@ def test_write_daily_prices_rejects_source_mismatch_before_write() -> None:
             raw_object_id=11,
             source="sec",
             available_at_policy_id=3,
+            normalized_by_run_id=29,
         )
 
     assert not connection.prices_daily
+
+
+def test_load_daily_price_policy_returns_versioned_policy() -> None:
+    policy = DailyPriceRepository(FakeConnection()).load_daily_price_policy()
+
+    assert policy.id == 3
+    assert policy.name == "daily_price"
+    assert policy.version == 1
+    assert policy.rule == DAILY_PRICE_RULE
 
 
 def _price_row(day: date, *, close: str = "185.64") -> DailyPriceRow:
@@ -261,7 +267,7 @@ class FakeConnection:
                 }
             }
         )
-        self.prices_daily: dict[tuple[int, date, str, int], dict[str, Any]] = {}
+        self.prices_daily: dict[tuple[int, date], dict[str, Any]] = {}
         self.executed: list[tuple[str, dict[str, Any]]] = []
         self.price_write_count = 0
 
@@ -304,8 +310,19 @@ class FakeCursor:
         return self._many
 
     def _select_policy(self, params: dict[str, Any]) -> None:
-        policy_id = params["available_at_policy_id"]
-        self._one = self.connection.policies.get(policy_id)
+        if "available_at_policy_id" in params:
+            policy_id = params["available_at_policy_id"]
+            self._one = self.connection.policies.get(policy_id)
+            return
+        self._one = next(
+            (
+                policy
+                for policy in self.connection.policies.values()
+                if policy["name"] == params["name"]
+                and policy["version"] == params["version"]
+            ),
+            None,
+        )
 
     def _select_security(self, params: dict[str, Any]) -> None:
         security_id = self.connection.securities.get(params["ticker"])
@@ -323,7 +340,5 @@ class FakeCursor:
         key = (
             params["security_id"],
             params["date"],
-            params["source"],
-            params["raw_object_id"],
         )
         self.connection.prices_daily[key] = dict(params)

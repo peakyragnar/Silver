@@ -5,6 +5,8 @@ tracker:
   active_states:
     - Todo
     - In Progress
+    - Rework
+    - Merging
   terminal_states:
     - Done
     - Canceled
@@ -73,7 +75,12 @@ No description provided.
 - `Backlog`: do not modify; stop.
 - `Todo`: move to `In Progress`, create or refresh the workpad, then execute.
 - `In Progress`: continue execution from the workpad.
-- `In Review`: wait for human review; do not code.
+- `Rework`: resume from review feedback, repair the existing PR, refresh the
+  proof packet, then move back to `Human Review`.
+- `Human Review`: wait for human review; do not code.
+- `Merging`: do not add new scope. Act as merge steward: verify the approved PR,
+  update/rebase only if required, rerun failed or stale checks, add the PR to
+  GitHub merge queue, confirm it lands on `main`, then move the issue to `Done`.
 - `Done`: terminal; stop.
 - `Canceled`: terminal; stop.
 - `Duplicate`: terminal; stop.
@@ -88,8 +95,40 @@ No description provided.
 6. Run targeted validation, then broader available validation.
 7. Commit cleanly.
 8. Push a branch and open/update a pull request when GitHub access is available.
-9. Move to `In Review` only after acceptance criteria and validation are
-   complete or a true external blocker is documented.
+9. Post a proof packet to Linear.
+10. Move to `Human Review` only after acceptance criteria and validation are
+    complete or a true external blocker is documented.
+
+## Proof Packet
+
+Before moving a ticket to `Human Review`, post a Linear comment headed
+`## Proof Packet` with:
+
+- PR link.
+- Changed files summary.
+- Acceptance criteria status.
+- Validation commands run and outcome.
+- CI status or link if available.
+- Risks, assumptions, and known gaps.
+- Generated artifact path or link when the ticket creates an artifact.
+- Exact blocker if the work cannot be completed.
+
+Do not move to `Human Review` with only a prose claim. The packet must give
+Michael enough evidence to approve, reject, or move the issue to `Rework`.
+
+## Merge Steward Rules
+
+When current status is `Merging`:
+
+1. Find the PR associated with the Linear issue identifier.
+2. Confirm the PR still matches the approved scope and has passing required
+   checks.
+3. If GitHub requires an update, perform the smallest branch update and rerun
+   validation.
+4. Add the PR to GitHub merge queue; do not bypass the queue.
+5. After merge, pull/verify `origin/main` contains the merge commit when
+   practical.
+6. Move the Linear issue to `Done` and post a short merge confirmation.
 
 ## Silver-Specific Quality Bar
 
@@ -107,7 +146,7 @@ Run whichever of these exist for the current repository state:
 git diff --check
 python -m pytest
 ruff check .
-python scripts/run_falsifier.py --strategy momentum_12_1 --horizon 30 --universe falsifier_seed
+python scripts/run_falsifier.py --strategy momentum_12_1 --horizon 63 --universe falsifier_seed
 ```
 
 If a validation command does not exist yet, record that plainly in the workpad
