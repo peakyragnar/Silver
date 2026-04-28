@@ -8,6 +8,10 @@ Silver is prepared to be run by the local Symphony checkout at
 - The Silver repository must be pushed to GitHub so Symphony can clone it.
 - `LINEAR_API_KEY` must be set in the shell that launches Symphony.
 - `WORKFLOW.md` must have the correct Linear `tracker.project_slug`.
+- Codex CLI `0.125.0` or newer is required for the pinned `gpt-5.5` model.
+- The workflow uses `danger-full-access` for Codex turns so unattended agents can
+  create branches, commits, and PR handoffs. Only move trusted, scoped tickets
+  into active states.
 - The local Symphony Elixir dependencies should already be installed under
   `/Users/michael/symphony/elixir`.
 
@@ -24,6 +28,8 @@ If the Linear project changes, edit [`../WORKFLOW.md`](../WORKFLOW.md):
 - Set `tracker.project_slug` to the new Silver Linear project slug.
 - Keep `agent.max_concurrent_agents` low at first (`1` or `2`).
 - Keep the workspace root outside this repository.
+- Keep `In Review` as a non-active Linear state so completed PRs stop being
+  picked up by Symphony while they wait for human review.
 
 ## Run
 

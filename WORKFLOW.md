@@ -25,11 +25,11 @@ agent:
   max_concurrent_agents: 2
   max_turns: 12
 codex:
-  command: codex --config shell_environment_policy.inherit=all app-server
+  command: codex --config shell_environment_policy.inherit=all --config 'model="gpt-5.5"' app-server
   approval_policy: never
-  thread_sandbox: workspace-write
+  thread_sandbox: danger-full-access
   turn_sandbox_policy:
-    type: workspaceWrite
+    type: dangerFullAccess
 ---
 
 You are working on Linear ticket `{{ issue.identifier }}` for the Silver
