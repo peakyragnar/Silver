@@ -18,7 +18,7 @@ signal on the seed universe.
 - [ ] `.env` is ignored and `.env.example` documents required variables
 - [ ] `pyproject.toml` defines the local Python package and test tooling
 - [ ] `db/migrations/001_foundation.sql` creates core schema objects
-- [ ] Trading calendar is seeded for 2014-2026
+- [x] Trading calendar is seeded for 2014-2026
 - [ ] Seed universe contains NVDA, MSFT, AAPL, GOOGL, and JPM
 - [ ] Prices can be ingested for the seed universe
 - [ ] Labels are computed for 5, 21, 63, 126, and 252 trading-day horizons
@@ -28,9 +28,12 @@ signal on the seed universe.
 
 ## Validation
 
-- [ ] `git diff --check`
-- [ ] `python -m pytest`
-- [ ] `python scripts/run_falsifier.py --strategy momentum_12_1 --horizon 63 --universe falsifier_seed`
+- [x] `git diff --check`
+- [x] `python scripts/seed_trading_calendar.py --check`
+- [x] `python scripts/apply_migrations.py --check`
+- [x] `python -m pytest`
+- [x] `ruff check .`
+- [ ] `python scripts/run_falsifier.py --strategy momentum_12_1 --horizon 63 --universe falsifier_seed` (script not present yet)
 
 ## Suggested Ticket Breakdown
 
