@@ -1094,22 +1094,22 @@ Replay procedure:
 
 ### Phase 1 — Foundation (1.5 weeks)
 
-**Goal:** Silver can persist data with full PIT discipline and reproduce a known anomaly on a tiny universe.
+**Goal:** Silver can persist data with full PIT discipline and reproduce a known anomaly on a small cross-sector universe.
 
 Deliverables:
 - Migration `001_foundation.sql` applied
 - Trading calendar seeded for 2014–2026
-- 5 initial securities (NVDA, MSFT, AAPL, GOOGL, JPM) seeded
+- 45 initial liquid securities seeded across major non-REIT sectors
 - Universe `falsifier_seed` populated
 - `available_at_policies` table populated with initial policy versions
 - FMP + SEC clients with rate limits
 - Raw vault writer with idempotent storage
-- Prices ingested for 5 tickers × 10 years
+- Prices ingested for 45 tickers × 10 years
 - Forward labels computed
 - Walk-forward harness runnable
-- **12-1 momentum anomaly reproduced on 5 tickers × 10 years with positive Sharpe**
+- **12-1 momentum anomaly reproduced on the 45-ticker falsifier universe with positive Sharpe**
 
-**Phase 1 exit criterion:** A `pytest tests/integration/test_momentum_replication.py` passes, asserting that 12-1 momentum has Sharpe > 0.2 on the 5-ticker / 10-year universe under realistic costs.
+**Phase 1 exit criterion:** A `pytest tests/integration/test_momentum_replication.py` passes, asserting that 12-1 momentum has Sharpe > 0.2 on the 40-50 ticker / 10-year universe under realistic costs.
 
 ### Phase 2 — Trustworthy backtest infrastructure (1.5 weeks)
 
@@ -1212,12 +1212,12 @@ The most concrete possible week-1 target:
 **Day 1–2:**
 - Repo bootstrap, virtualenv, pyproject
 - Migration 001 applied
-- 5 securities seeded
+- 45 securities seeded
 - 10y NYSE calendar seeded
 
 **Day 3–4:**
 - FMP client built and tested
-- Prices ingested for 5 tickers × 10 years (~12,500 rows)
+- Prices ingested for 45 tickers × 10 years (~113,000 rows)
 - Forward labels computed at 5/21/63/126/252-trading-day horizons
 
 **Day 5:**
@@ -1264,7 +1264,7 @@ These need answers before phase 1 begins. None of them block reading this spec.
 | AI text features look great in backtest, fail live | Medium | Medium | 3-month paper validation required before live; drift monitoring continuous |
 | LLM cost runs away | Low | Medium | Model router prefers cheap tiers; daily incremental only on new artifacts; monthly cost ceiling |
 | Vendor data gaps create silent holes | Medium | Medium | `data_quality_findings` writes; predictions can be blocked on gaps; weekly review |
-| Survivorship bias inflates backtest performance | High at scale | High | Documented for falsifier (40 tickers); must address before universe expansion |
+| Survivorship bias inflates backtest performance | High at scale | High | Documented for falsifier (40-50 tickers); must address before universe expansion |
 | Regime change kills validated hypothesis | Medium | Medium | Per-regime metrics in every backtest; live drift monitoring; auto-retirement |
 | Capacity invisible at scale | Medium | High | Capacity estimate in every backtest; capacity gates in portfolio; halt below threshold |
 | Code drift breaks reproducibility | Low | Catastrophic | Every result tagged with code_git_sha; replay procedure documented |

@@ -22,11 +22,12 @@ ROOT = Path(__file__).resolve().parents[1]
 SEED_SCRIPT = ROOT / "scripts" / "seed_reference_data.py"
 
 
-def test_default_seed_config_contains_exact_falsifier_universe() -> None:
+def test_default_seed_config_contains_expanded_falsifier_universe() -> None:
     seed_config = load_seed_file(DEFAULT_CONFIG_PATH)
 
     assert seed_config.falsifier_tickers == tuple(sorted(REQUIRED_FALSIFIER_TICKERS))
-    assert seed_config.falsifier_tickers == ("AAPL", "GOOGL", "JPM", "MSFT", "NVDA")
+    assert len(seed_config.falsifier_tickers) == 45
+    assert 40 <= len(seed_config.falsifier_tickers) <= 50
 
 
 def test_default_seed_config_identifiers_cover_tickers_and_ciks() -> None:
@@ -50,6 +51,7 @@ def test_default_seed_config_has_valid_membership_dates() -> None:
         assert membership.universe_name == FALSIFIER_UNIVERSE_NAME
         assert membership.valid_from.isoformat() == "2014-04-03"
         assert membership.valid_to is None
+        assert membership.reason is not None
 
 
 def test_default_seed_config_memberships_reference_known_securities_only() -> None:
@@ -104,6 +106,14 @@ def test_validation_rejects_invalid_membership_date_range() -> None:
         validate_seed_config(raw)
 
 
+def test_validation_rejects_missing_membership_reason() -> None:
+    raw = _valid_raw_config()
+    raw["universe_memberships"][0].pop("reason")
+
+    with pytest.raises(SeedValidationError, match="must have a non-empty reason"):
+        validate_seed_config(raw)
+
+
 def test_check_command_fails_fast_on_bad_universe_membership(tmp_path: Path) -> None:
     config_path = tmp_path / "seed_reference_data.yaml"
     config_path.write_text(
@@ -126,6 +136,7 @@ def test_check_command_fails_fast_on_bad_universe_membership(tmp_path: Path) -> 
               - universe_name: falsifier_seed
                 ticker: NVDA
                 valid_from: "2014-04-03"
+                reason: Too small to satisfy the expanded falsifier seed.
             """
         ),
         encoding="utf-8",

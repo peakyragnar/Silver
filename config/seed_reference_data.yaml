@@ -1,5 +1,5 @@
 seed_set_version: 1
-description: Initial securities and point-in-time falsifier universe membership.
+description: Expanded securities and point-in-time falsifier universe membership.
 securities:
   - ticker: AAPL
     name: Apple Inc.
@@ -14,6 +14,216 @@ securities:
         valid_from: "2014-04-03"
       - type: cik
         identifier: "0000320193"
+        valid_from: "2014-04-03"
+
+  - ticker: ABBV
+    name: AbbVie Inc.
+    cik: "0001551152"
+    exchange: NYSE
+    asset_class: equity
+    country: US
+    currency: USD
+    identifiers:
+      - type: ticker
+        identifier: ABBV
+        valid_from: "2014-04-03"
+      - type: cik
+        identifier: "0001551152"
+        valid_from: "2014-04-03"
+
+  - ticker: ADBE
+    name: Adobe Inc.
+    cik: "0000796343"
+    exchange: NASDAQ
+    asset_class: equity
+    country: US
+    currency: USD
+    identifiers:
+      - type: ticker
+        identifier: ADBE
+        valid_from: "2014-04-03"
+      - type: cik
+        identifier: "0000796343"
+        valid_from: "2014-04-03"
+
+  - ticker: AMGN
+    name: Amgen Inc.
+    cik: "0000318154"
+    exchange: NASDAQ
+    asset_class: equity
+    country: US
+    currency: USD
+    identifiers:
+      - type: ticker
+        identifier: AMGN
+        valid_from: "2014-04-03"
+      - type: cik
+        identifier: "0000318154"
+        valid_from: "2014-04-03"
+
+  - ticker: AMZN
+    name: Amazon.com, Inc.
+    cik: "0001018724"
+    exchange: NASDAQ
+    asset_class: equity
+    country: US
+    currency: USD
+    identifiers:
+      - type: ticker
+        identifier: AMZN
+        valid_from: "2014-04-03"
+      - type: cik
+        identifier: "0001018724"
+        valid_from: "2014-04-03"
+
+  - ticker: APD
+    name: "Air Products & Chemicals, Inc."
+    cik: "0000002969"
+    exchange: NYSE
+    asset_class: equity
+    country: US
+    currency: USD
+    identifiers:
+      - type: ticker
+        identifier: APD
+        valid_from: "2014-04-03"
+      - type: cik
+        identifier: "0000002969"
+        valid_from: "2014-04-03"
+
+  - ticker: BAC
+    name: Bank of America Corporation
+    cik: "0000070858"
+    exchange: NYSE
+    asset_class: equity
+    country: US
+    currency: USD
+    identifiers:
+      - type: ticker
+        identifier: BAC
+        valid_from: "2014-04-03"
+      - type: cik
+        identifier: "0000070858"
+        valid_from: "2014-04-03"
+
+  - ticker: CAT
+    name: Caterpillar Inc.
+    cik: "0000018230"
+    exchange: NYSE
+    asset_class: equity
+    country: US
+    currency: USD
+    identifiers:
+      - type: ticker
+        identifier: CAT
+        valid_from: "2014-04-03"
+      - type: cik
+        identifier: "0000018230"
+        valid_from: "2014-04-03"
+
+  - ticker: COP
+    name: ConocoPhillips
+    cik: "0001163165"
+    exchange: NYSE
+    asset_class: equity
+    country: US
+    currency: USD
+    identifiers:
+      - type: ticker
+        identifier: COP
+        valid_from: "2014-04-03"
+      - type: cik
+        identifier: "0001163165"
+        valid_from: "2014-04-03"
+
+  - ticker: COST
+    name: Costco Wholesale Corporation
+    cik: "0000909832"
+    exchange: NASDAQ
+    asset_class: equity
+    country: US
+    currency: USD
+    identifiers:
+      - type: ticker
+        identifier: COST
+        valid_from: "2014-04-03"
+      - type: cik
+        identifier: "0000909832"
+        valid_from: "2014-04-03"
+
+  - ticker: CRM
+    name: Salesforce, Inc.
+    cik: "0001108524"
+    exchange: NYSE
+    asset_class: equity
+    country: US
+    currency: USD
+    identifiers:
+      - type: ticker
+        identifier: CRM
+        valid_from: "2014-04-03"
+      - type: cik
+        identifier: "0001108524"
+        valid_from: "2014-04-03"
+
+  - ticker: CSCO
+    name: Cisco Systems, Inc.
+    cik: "0000858877"
+    exchange: NASDAQ
+    asset_class: equity
+    country: US
+    currency: USD
+    identifiers:
+      - type: ticker
+        identifier: CSCO
+        valid_from: "2014-04-03"
+      - type: cik
+        identifier: "0000858877"
+        valid_from: "2014-04-03"
+
+  - ticker: CVX
+    name: Chevron Corporation
+    cik: "0000093410"
+    exchange: NYSE
+    asset_class: equity
+    country: US
+    currency: USD
+    identifiers:
+      - type: ticker
+        identifier: CVX
+        valid_from: "2014-04-03"
+      - type: cik
+        identifier: "0000093410"
+        valid_from: "2014-04-03"
+
+  - ticker: DE
+    name: "Deere & Company"
+    cik: "0000315189"
+    exchange: NYSE
+    asset_class: equity
+    country: US
+    currency: USD
+    identifiers:
+      - type: ticker
+        identifier: DE
+        valid_from: "2014-04-03"
+      - type: cik
+        identifier: "0000315189"
+        valid_from: "2014-04-03"
+
+  - ticker: FCX
+    name: Freeport-McMoRan Inc.
+    cik: "0000831259"
+    exchange: NYSE
+    asset_class: equity
+    country: US
+    currency: USD
+    identifiers:
+      - type: ticker
+        identifier: FCX
+        valid_from: "2014-04-03"
+      - type: cik
+        identifier: "0000831259"
         valid_from: "2014-04-03"
 
   - ticker: GOOGL
@@ -31,6 +241,66 @@ securities:
         identifier: "0001652044"
         valid_from: "2014-04-03"
 
+  - ticker: GS
+    name: The Goldman Sachs Group, Inc.
+    cik: "0000886982"
+    exchange: NYSE
+    asset_class: equity
+    country: US
+    currency: USD
+    identifiers:
+      - type: ticker
+        identifier: GS
+        valid_from: "2014-04-03"
+      - type: cik
+        identifier: "0000886982"
+        valid_from: "2014-04-03"
+
+  - ticker: HD
+    name: The Home Depot, Inc.
+    cik: "0000354950"
+    exchange: NYSE
+    asset_class: equity
+    country: US
+    currency: USD
+    identifiers:
+      - type: ticker
+        identifier: HD
+        valid_from: "2014-04-03"
+      - type: cik
+        identifier: "0000354950"
+        valid_from: "2014-04-03"
+
+  - ticker: INTC
+    name: Intel Corporation
+    cik: "0000050863"
+    exchange: NASDAQ
+    asset_class: equity
+    country: US
+    currency: USD
+    identifiers:
+      - type: ticker
+        identifier: INTC
+        valid_from: "2014-04-03"
+      - type: cik
+        identifier: "0000050863"
+        valid_from: "2014-04-03"
+
+  - ticker: JNJ
+    name: "Johnson & Johnson"
+    cik: "0000200406"
+    exchange: NYSE
+    asset_class: equity
+    country: US
+    currency: USD
+    identifiers:
+      - type: ticker
+        identifier: JNJ
+        valid_from: "2014-04-03"
+      - type: cik
+        identifier: "0000200406"
+        valid_from: "2014-04-03"
+
   - ticker: JPM
     name: "JPMorgan Chase & Co."
     cik: "0000019617"
@@ -44,6 +314,96 @@ securities:
         valid_from: "2014-04-03"
       - type: cik
         identifier: "0000019617"
+        valid_from: "2014-04-03"
+
+  - ticker: KO
+    name: The Coca-Cola Company
+    cik: "0000021344"
+    exchange: NYSE
+    asset_class: equity
+    country: US
+    currency: USD
+    identifiers:
+      - type: ticker
+        identifier: KO
+        valid_from: "2014-04-03"
+      - type: cik
+        identifier: "0000021344"
+        valid_from: "2014-04-03"
+
+  - ticker: LLY
+    name: Eli Lilly and Company
+    cik: "0000059478"
+    exchange: NYSE
+    asset_class: equity
+    country: US
+    currency: USD
+    identifiers:
+      - type: ticker
+        identifier: LLY
+        valid_from: "2014-04-03"
+      - type: cik
+        identifier: "0000059478"
+        valid_from: "2014-04-03"
+
+  - ticker: LOW
+    name: "Lowe's Companies, Inc."
+    cik: "0000060667"
+    exchange: NYSE
+    asset_class: equity
+    country: US
+    currency: USD
+    identifiers:
+      - type: ticker
+        identifier: LOW
+        valid_from: "2014-04-03"
+      - type: cik
+        identifier: "0000060667"
+        valid_from: "2014-04-03"
+
+  - ticker: MA
+    name: Mastercard Incorporated
+    cik: "0001141391"
+    exchange: NYSE
+    asset_class: equity
+    country: US
+    currency: USD
+    identifiers:
+      - type: ticker
+        identifier: MA
+        valid_from: "2014-04-03"
+      - type: cik
+        identifier: "0001141391"
+        valid_from: "2014-04-03"
+
+  - ticker: MCD
+    name: "McDonald's Corporation"
+    cik: "0000063908"
+    exchange: NYSE
+    asset_class: equity
+    country: US
+    currency: USD
+    identifiers:
+      - type: ticker
+        identifier: MCD
+        valid_from: "2014-04-03"
+      - type: cik
+        identifier: "0000063908"
+        valid_from: "2014-04-03"
+
+  - ticker: MRK
+    name: "Merck & Co., Inc."
+    cik: "0000310158"
+    exchange: NYSE
+    asset_class: equity
+    country: US
+    currency: USD
+    identifiers:
+      - type: ticker
+        identifier: MRK
+        valid_from: "2014-04-03"
+      - type: cik
+        identifier: "0000310158"
         valid_from: "2014-04-03"
 
   - ticker: MSFT
@@ -61,6 +421,51 @@ securities:
         identifier: "0000789019"
         valid_from: "2014-04-03"
 
+  - ticker: NEE
+    name: NextEra Energy, Inc.
+    cik: "0000753308"
+    exchange: NYSE
+    asset_class: equity
+    country: US
+    currency: USD
+    identifiers:
+      - type: ticker
+        identifier: NEE
+        valid_from: "2014-04-03"
+      - type: cik
+        identifier: "0000753308"
+        valid_from: "2014-04-03"
+
+  - ticker: NFLX
+    name: Netflix, Inc.
+    cik: "0001065280"
+    exchange: NASDAQ
+    asset_class: equity
+    country: US
+    currency: USD
+    identifiers:
+      - type: ticker
+        identifier: NFLX
+        valid_from: "2014-04-03"
+      - type: cik
+        identifier: "0001065280"
+        valid_from: "2014-04-03"
+
+  - ticker: NKE
+    name: NIKE, Inc.
+    cik: "0000320187"
+    exchange: NYSE
+    asset_class: equity
+    country: US
+    currency: USD
+    identifiers:
+      - type: ticker
+        identifier: NKE
+        valid_from: "2014-04-03"
+      - type: cik
+        identifier: "0000320187"
+        valid_from: "2014-04-03"
+
   - ticker: NVDA
     name: NVIDIA Corporation
     cik: "0001045810"
@@ -76,24 +481,379 @@ securities:
         identifier: "0001045810"
         valid_from: "2014-04-03"
 
+  - ticker: ORCL
+    name: Oracle Corporation
+    cik: "0001341439"
+    exchange: NYSE
+    asset_class: equity
+    country: US
+    currency: USD
+    identifiers:
+      - type: ticker
+        identifier: ORCL
+        valid_from: "2014-04-03"
+      - type: cik
+        identifier: "0001341439"
+        valid_from: "2014-04-03"
+
+  - ticker: PEP
+    name: PepsiCo, Inc.
+    cik: "0000077476"
+    exchange: NASDAQ
+    asset_class: equity
+    country: US
+    currency: USD
+    identifiers:
+      - type: ticker
+        identifier: PEP
+        valid_from: "2014-04-03"
+      - type: cik
+        identifier: "0000077476"
+        valid_from: "2014-04-03"
+
+  - ticker: PFE
+    name: Pfizer Inc.
+    cik: "0000078003"
+    exchange: NYSE
+    asset_class: equity
+    country: US
+    currency: USD
+    identifiers:
+      - type: ticker
+        identifier: PFE
+        valid_from: "2014-04-03"
+      - type: cik
+        identifier: "0000078003"
+        valid_from: "2014-04-03"
+
+  - ticker: PG
+    name: "The Procter & Gamble Company"
+    cik: "0000080424"
+    exchange: NYSE
+    asset_class: equity
+    country: US
+    currency: USD
+    identifiers:
+      - type: ticker
+        identifier: PG
+        valid_from: "2014-04-03"
+      - type: cik
+        identifier: "0000080424"
+        valid_from: "2014-04-03"
+
+  - ticker: QCOM
+    name: Qualcomm Incorporated
+    cik: "0000804328"
+    exchange: NASDAQ
+    asset_class: equity
+    country: US
+    currency: USD
+    identifiers:
+      - type: ticker
+        identifier: QCOM
+        valid_from: "2014-04-03"
+      - type: cik
+        identifier: "0000804328"
+        valid_from: "2014-04-03"
+
+  - ticker: SBUX
+    name: Starbucks Corporation
+    cik: "0000829224"
+    exchange: NASDAQ
+    asset_class: equity
+    country: US
+    currency: USD
+    identifiers:
+      - type: ticker
+        identifier: SBUX
+        valid_from: "2014-04-03"
+      - type: cik
+        identifier: "0000829224"
+        valid_from: "2014-04-03"
+
+  - ticker: UNH
+    name: UnitedHealth Group Incorporated
+    cik: "0000731766"
+    exchange: NYSE
+    asset_class: equity
+    country: US
+    currency: USD
+    identifiers:
+      - type: ticker
+        identifier: UNH
+        valid_from: "2014-04-03"
+      - type: cik
+        identifier: "0000731766"
+        valid_from: "2014-04-03"
+
+  - ticker: UNP
+    name: Union Pacific Corporation
+    cik: "0000100885"
+    exchange: NYSE
+    asset_class: equity
+    country: US
+    currency: USD
+    identifiers:
+      - type: ticker
+        identifier: UNP
+        valid_from: "2014-04-03"
+      - type: cik
+        identifier: "0000100885"
+        valid_from: "2014-04-03"
+
+  - ticker: UPS
+    name: United Parcel Service, Inc. Class B
+    cik: "0001090727"
+    exchange: NYSE
+    asset_class: equity
+    country: US
+    currency: USD
+    identifiers:
+      - type: ticker
+        identifier: UPS
+        valid_from: "2014-04-03"
+      - type: cik
+        identifier: "0001090727"
+        valid_from: "2014-04-03"
+
+  - ticker: V
+    name: Visa Inc.
+    cik: "0001403161"
+    exchange: NYSE
+    asset_class: equity
+    country: US
+    currency: USD
+    identifiers:
+      - type: ticker
+        identifier: V
+        valid_from: "2014-04-03"
+      - type: cik
+        identifier: "0001403161"
+        valid_from: "2014-04-03"
+
+  - ticker: WFC
+    name: "Wells Fargo & Company"
+    cik: "0000072971"
+    exchange: NYSE
+    asset_class: equity
+    country: US
+    currency: USD
+    identifiers:
+      - type: ticker
+        identifier: WFC
+        valid_from: "2014-04-03"
+      - type: cik
+        identifier: "0000072971"
+        valid_from: "2014-04-03"
+
+  - ticker: WMT
+    name: Walmart Inc.
+    cik: "0000104169"
+    exchange: NYSE
+    asset_class: equity
+    country: US
+    currency: USD
+    identifiers:
+      - type: ticker
+        identifier: WMT
+        valid_from: "2014-04-03"
+      - type: cik
+        identifier: "0000104169"
+        valid_from: "2014-04-03"
+
+  - ticker: XOM
+    name: Exxon Mobil Corporation
+    cik: "0000034088"
+    exchange: NYSE
+    asset_class: equity
+    country: US
+    currency: USD
+    identifiers:
+      - type: ticker
+        identifier: XOM
+        valid_from: "2014-04-03"
+      - type: cik
+        identifier: "0000034088"
+        valid_from: "2014-04-03"
+
 universe_memberships:
   - universe_name: falsifier_seed
     ticker: AAPL
     valid_from: "2014-04-03"
-    reason: Initial liquid cross-sector plumbing sanity seed.
+    reason: Liquid information-technology equity for cross-sector falsifier coverage.
+  - universe_name: falsifier_seed
+    ticker: ABBV
+    valid_from: "2014-04-03"
+    reason: Liquid health-care equity for cross-sector falsifier coverage.
+  - universe_name: falsifier_seed
+    ticker: ADBE
+    valid_from: "2014-04-03"
+    reason: Liquid information-technology equity for cross-sector falsifier coverage.
+  - universe_name: falsifier_seed
+    ticker: AMGN
+    valid_from: "2014-04-03"
+    reason: Liquid health-care equity for cross-sector falsifier coverage.
+  - universe_name: falsifier_seed
+    ticker: AMZN
+    valid_from: "2014-04-03"
+    reason: Liquid consumer-discretionary equity for cross-sector falsifier coverage.
+  - universe_name: falsifier_seed
+    ticker: APD
+    valid_from: "2014-04-03"
+    reason: Liquid materials equity for cross-sector falsifier coverage.
+  - universe_name: falsifier_seed
+    ticker: BAC
+    valid_from: "2014-04-03"
+    reason: Liquid financial-sector equity; no bank-specific feature assumptions.
+  - universe_name: falsifier_seed
+    ticker: CAT
+    valid_from: "2014-04-03"
+    reason: Liquid industrial equity for cross-sector falsifier coverage.
+  - universe_name: falsifier_seed
+    ticker: COP
+    valid_from: "2014-04-03"
+    reason: Liquid energy equity for cross-sector falsifier coverage.
+  - universe_name: falsifier_seed
+    ticker: COST
+    valid_from: "2014-04-03"
+    reason: Liquid consumer-staples equity for cross-sector falsifier coverage.
+  - universe_name: falsifier_seed
+    ticker: CRM
+    valid_from: "2014-04-03"
+    reason: Liquid information-technology equity for cross-sector falsifier coverage.
+  - universe_name: falsifier_seed
+    ticker: CSCO
+    valid_from: "2014-04-03"
+    reason: Liquid information-technology equity for cross-sector falsifier coverage.
+  - universe_name: falsifier_seed
+    ticker: CVX
+    valid_from: "2014-04-03"
+    reason: Liquid energy equity for cross-sector falsifier coverage.
+  - universe_name: falsifier_seed
+    ticker: DE
+    valid_from: "2014-04-03"
+    reason: Liquid industrial equity for cross-sector falsifier coverage.
+  - universe_name: falsifier_seed
+    ticker: FCX
+    valid_from: "2014-04-03"
+    reason: Liquid materials equity for cross-sector falsifier coverage.
   - universe_name: falsifier_seed
     ticker: GOOGL
     valid_from: "2014-04-03"
-    reason: Initial liquid cross-sector plumbing sanity seed.
+    reason: Liquid communication-services equity for cross-sector falsifier coverage.
+  - universe_name: falsifier_seed
+    ticker: GS
+    valid_from: "2014-04-03"
+    reason: Liquid financial-sector equity; no bank-specific feature assumptions.
+  - universe_name: falsifier_seed
+    ticker: HD
+    valid_from: "2014-04-03"
+    reason: Liquid consumer-discretionary equity for cross-sector falsifier coverage.
+  - universe_name: falsifier_seed
+    ticker: INTC
+    valid_from: "2014-04-03"
+    reason: Liquid information-technology equity for cross-sector falsifier coverage.
+  - universe_name: falsifier_seed
+    ticker: JNJ
+    valid_from: "2014-04-03"
+    reason: Liquid health-care equity for cross-sector falsifier coverage.
   - universe_name: falsifier_seed
     ticker: JPM
     valid_from: "2014-04-03"
-    reason: Liquid financial-sector plumbing sanity check; not feature parity.
+    reason: Liquid financial-sector equity; no bank-specific feature assumptions.
+  - universe_name: falsifier_seed
+    ticker: KO
+    valid_from: "2014-04-03"
+    reason: Liquid consumer-staples equity for cross-sector falsifier coverage.
+  - universe_name: falsifier_seed
+    ticker: LLY
+    valid_from: "2014-04-03"
+    reason: Liquid health-care equity for cross-sector falsifier coverage.
+  - universe_name: falsifier_seed
+    ticker: LOW
+    valid_from: "2014-04-03"
+    reason: Liquid consumer-discretionary equity for cross-sector falsifier coverage.
+  - universe_name: falsifier_seed
+    ticker: MA
+    valid_from: "2014-04-03"
+    reason: Liquid financial-services equity for cross-sector falsifier coverage.
+  - universe_name: falsifier_seed
+    ticker: MCD
+    valid_from: "2014-04-03"
+    reason: Liquid consumer-discretionary equity for cross-sector falsifier coverage.
+  - universe_name: falsifier_seed
+    ticker: MRK
+    valid_from: "2014-04-03"
+    reason: Liquid health-care equity for cross-sector falsifier coverage.
   - universe_name: falsifier_seed
     ticker: MSFT
     valid_from: "2014-04-03"
-    reason: Initial liquid cross-sector plumbing sanity seed.
+    reason: Liquid information-technology equity for cross-sector falsifier coverage.
+  - universe_name: falsifier_seed
+    ticker: NEE
+    valid_from: "2014-04-03"
+    reason: Liquid utilities equity for cross-sector falsifier coverage.
+  - universe_name: falsifier_seed
+    ticker: NFLX
+    valid_from: "2014-04-03"
+    reason: Liquid communication-services equity for cross-sector falsifier coverage.
+  - universe_name: falsifier_seed
+    ticker: NKE
+    valid_from: "2014-04-03"
+    reason: Liquid consumer-discretionary equity for cross-sector falsifier coverage.
   - universe_name: falsifier_seed
     ticker: NVDA
     valid_from: "2014-04-03"
-    reason: Initial liquid cross-sector plumbing sanity seed.
+    reason: Liquid information-technology equity for cross-sector falsifier coverage.
+  - universe_name: falsifier_seed
+    ticker: ORCL
+    valid_from: "2014-04-03"
+    reason: Liquid information-technology equity for cross-sector falsifier coverage.
+  - universe_name: falsifier_seed
+    ticker: PEP
+    valid_from: "2014-04-03"
+    reason: Liquid consumer-staples equity for cross-sector falsifier coverage.
+  - universe_name: falsifier_seed
+    ticker: PFE
+    valid_from: "2014-04-03"
+    reason: Liquid health-care equity for cross-sector falsifier coverage.
+  - universe_name: falsifier_seed
+    ticker: PG
+    valid_from: "2014-04-03"
+    reason: Liquid consumer-staples equity for cross-sector falsifier coverage.
+  - universe_name: falsifier_seed
+    ticker: QCOM
+    valid_from: "2014-04-03"
+    reason: Liquid information-technology equity for cross-sector falsifier coverage.
+  - universe_name: falsifier_seed
+    ticker: SBUX
+    valid_from: "2014-04-03"
+    reason: Liquid consumer-discretionary equity for cross-sector falsifier coverage.
+  - universe_name: falsifier_seed
+    ticker: UNH
+    valid_from: "2014-04-03"
+    reason: Liquid health-care equity for cross-sector falsifier coverage.
+  - universe_name: falsifier_seed
+    ticker: UNP
+    valid_from: "2014-04-03"
+    reason: Liquid industrial equity for cross-sector falsifier coverage.
+  - universe_name: falsifier_seed
+    ticker: UPS
+    valid_from: "2014-04-03"
+    reason: Liquid industrial equity for cross-sector falsifier coverage.
+  - universe_name: falsifier_seed
+    ticker: V
+    valid_from: "2014-04-03"
+    reason: Liquid financial-services equity for cross-sector falsifier coverage.
+  - universe_name: falsifier_seed
+    ticker: WFC
+    valid_from: "2014-04-03"
+    reason: Liquid financial-sector equity; no bank-specific feature assumptions.
+  - universe_name: falsifier_seed
+    ticker: WMT
+    valid_from: "2014-04-03"
+    reason: Liquid consumer-staples equity for cross-sector falsifier coverage.
+  - universe_name: falsifier_seed
+    ticker: XOM
+    valid_from: "2014-04-03"
+    reason: Liquid energy equity for cross-sector falsifier coverage.
