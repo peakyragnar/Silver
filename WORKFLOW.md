@@ -22,7 +22,7 @@ hooks:
   before_remove: |
     true
 agent:
-  max_concurrent_agents: 3
+  max_concurrent_agents: 5
   max_turns: 12
 codex:
   command: codex --config shell_environment_policy.inherit=all --config 'model="gpt-5.5"' app-server
