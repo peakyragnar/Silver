@@ -93,6 +93,14 @@ python scripts/materialize_forward_labels.py --check
 python scripts/materialize_forward_labels.py --universe falsifier_seed
 ```
 
+Raw-return labels are the default. To also populate benchmark-relative fields,
+provide a benchmark ticker whose daily prices already exist in `prices_daily`;
+the benchmark is loaded explicitly and is not added to the prediction universe.
+
+```bash
+python scripts/materialize_forward_labels.py --universe falsifier_seed --benchmark-ticker SPY
+```
+
 Materialize the deterministic 12-1 momentum feature from prices:
 
 ```bash

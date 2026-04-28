@@ -103,6 +103,35 @@ class ForwardLabelRepository:
             rows = cursor.fetchall()
         return tuple(_price_observation(row) for row in rows)
 
+    def load_security_price_observations(
+        self,
+        *,
+        ticker: str,
+        price_start_date: date | None = None,
+        price_end_date: date | None = None,
+    ) -> tuple[ForwardLabelPriceObservation, ...]:
+        """Load normalized prices for one explicitly configured ticker.
+
+        This path intentionally does not join universe membership. It is for
+        benchmark inputs that should stay outside prediction universes unless
+        separately configured there.
+        """
+        normalized_ticker = _non_empty_str(ticker, "ticker").upper()
+        _date_or_none(price_start_date, "price_start_date")
+        _date_or_none(price_end_date, "price_end_date")
+
+        with _cursor(self._connection) as cursor:
+            cursor.execute(
+                _SELECT_SECURITY_PRICES_BY_TICKER_SQL,
+                {
+                    "ticker": normalized_ticker,
+                    "price_start_date": price_start_date,
+                    "price_end_date": price_end_date,
+                },
+            )
+            rows = cursor.fetchall()
+        return tuple(_price_observation(row) for row in rows)
+
     def load_label_dates_by_security(
         self,
         *,
@@ -567,6 +596,29 @@ JOIN member_securities AS m
 WHERE (%(price_start_date)s IS NULL OR p.date >= %(price_start_date)s)
   AND (%(price_end_date)s IS NULL OR p.date <= %(price_end_date)s)
 ORDER BY s.ticker, p.date;
+""".strip()
+
+_SELECT_SECURITY_PRICES_BY_TICKER_SQL = """
+SELECT
+    p.security_id,
+    s.ticker,
+    p.date,
+    p.open,
+    p.high,
+    p.low,
+    p.close,
+    p.adj_close,
+    p.volume,
+    p.source_system,
+    p.available_at,
+    p.available_at_policy_id
+FROM silver.prices_daily AS p
+JOIN silver.securities AS s
+  ON s.id = p.security_id
+WHERE upper(s.ticker) = upper(%(ticker)s)
+  AND (%(price_start_date)s IS NULL OR p.date >= %(price_start_date)s)
+  AND (%(price_end_date)s IS NULL OR p.date <= %(price_end_date)s)
+ORDER BY p.date;
 """.strip()
 
 _SELECT_LABEL_DATES_SQL = """

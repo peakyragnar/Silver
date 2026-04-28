@@ -66,6 +66,31 @@ def test_calculates_optional_benchmark_and_excess_returns() -> None:
     assert label.excess_return == Decimal("0.025")
 
 
+def test_missing_benchmark_price_does_not_zero_fill_excess_return() -> None:
+    calendar = _calendar_with_sessions(260)
+    sessions = _sessions(calendar)
+    prices = _prices("AAA", sessions)
+    benchmark_prices = [
+        row for row in _prices("SPY", sessions, start=Decimal("200"))
+        if row.date != sessions[5]
+    ]
+
+    result = calculate_forward_return_labels(
+        prices=prices,
+        calendar=calendar,
+        asof_dates=[sessions[0]],
+        horizons=[5],
+        benchmark_prices=benchmark_prices,
+    )
+
+    assert result.skipped == ()
+    assert len(result.labels) == 1
+    label = result.labels[0]
+    assert label.forward_return == Decimal("0.05")
+    assert label.benchmark_forward_return is None
+    assert label.excess_return is None
+
+
 def test_missing_target_price_is_surfaced_without_fake_label() -> None:
     calendar = _calendar_with_sessions(260)
     sessions = _sessions(calendar)

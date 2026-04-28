@@ -48,6 +48,9 @@ def test_build_records_uses_target_price_availability_and_surfaces_skips() -> No
     assert record.available_at == prices[2].available_at
     assert record.available_at_policy_id == prices[2].available_at_policy_id
     assert record.realized_raw_return == Decimal("0.05")
+    assert record.benchmark_security_id is None
+    assert record.realized_excess_return is None
+    assert "benchmark" not in record.metadata
     assert record.metadata["target_price_available_at"] == prices[2].available_at.isoformat()
 
     assert len(result.skipped) == 1
@@ -55,6 +58,106 @@ def test_build_records_uses_target_price_availability_and_surfaces_skips() -> No
     assert skipped.reason is SkipReason.MISSING_TARGET_PRICE
     assert skipped.asof_date == sessions[1]
     assert skipped.target_date == sessions[6]
+
+
+def test_build_records_populates_benchmark_relative_fields_and_pit_availability() -> None:
+    calendar = _calendar_with_sessions(8)
+    sessions = _sessions(calendar)
+    prices = [
+        _price_observation(sessions[0], adj_close="100", available_hour=23),
+        _price_observation(sessions[5], adj_close="110", available_hour=23),
+    ]
+    benchmark_prices = [
+        _price_observation(
+            sessions[0],
+            adj_close="200",
+            available_hour=23,
+            security_id=202,
+            ticker="SPY",
+            policy_id=4,
+        ),
+        _price_observation(
+            sessions[5],
+            adj_close="204",
+            available_hour=30,
+            security_id=202,
+            ticker="SPY",
+            policy_id=4,
+        ),
+    ]
+
+    result = build_forward_label_records(
+        prices=prices,
+        benchmark_prices=benchmark_prices,
+        calendar=calendar,
+        label_dates_by_security={101: (sessions[0],)},
+        computed_by_run_id=7,
+        horizons=(5,),
+    )
+
+    assert result.skipped == ()
+    assert len(result.records) == 1
+    record = result.records[0]
+    assert record.benchmark_security_id == 202
+    assert record.realized_raw_return == Decimal("0.1")
+    assert record.realized_excess_return == Decimal("0.08")
+    assert record.available_at == benchmark_prices[1].available_at
+    assert record.available_at_policy_id == 4
+    assert record.metadata["benchmark"] == {
+        "ticker": "SPY",
+        "security_id": 202,
+        "asof_date": sessions[0].isoformat(),
+        "target_date": sessions[5].isoformat(),
+        "status": "covered",
+        "start_price_available_at": benchmark_prices[0].available_at.isoformat(),
+        "start_price_available_at_policy_id": 4,
+        "target_price_available_at": benchmark_prices[1].available_at.isoformat(),
+        "target_price_available_at_policy_id": 4,
+        "benchmark_forward_return": "0.02",
+    }
+
+
+def test_build_records_marks_missing_benchmark_coverage_without_zero_fill() -> None:
+    calendar = _calendar_with_sessions(8)
+    sessions = _sessions(calendar)
+    prices = [
+        _price_observation(sessions[0], adj_close="100", available_hour=23),
+        _price_observation(sessions[5], adj_close="110", available_hour=23),
+    ]
+    benchmark_prices = [
+        _price_observation(
+            sessions[0],
+            adj_close="200",
+            available_hour=23,
+            security_id=202,
+            ticker="SPY",
+            policy_id=4,
+        ),
+    ]
+
+    result = build_forward_label_records(
+        prices=prices,
+        benchmark_prices=benchmark_prices,
+        calendar=calendar,
+        label_dates_by_security={101: (sessions[0],)},
+        computed_by_run_id=7,
+        horizons=(5,),
+    )
+
+    assert result.skipped == ()
+    assert len(result.records) == 1
+    record = result.records[0]
+    assert record.benchmark_security_id == 202
+    assert record.realized_raw_return == Decimal("0.1")
+    assert record.realized_excess_return is None
+    assert record.metadata["benchmark"] == {
+        "ticker": "SPY",
+        "security_id": 202,
+        "asof_date": sessions[0].isoformat(),
+        "target_date": sessions[5].isoformat(),
+        "status": "missing_target_price",
+        "missing_price_date": sessions[5].isoformat(),
+    }
 
 
 def test_write_forward_labels_is_idempotent_and_uses_expected_upsert_shape() -> None:
@@ -119,9 +222,48 @@ def test_repository_loads_universe_prices_and_pit_label_dates() -> None:
     assert "um.valid_to IS NULL OR um.valid_to >= p.date" in label_dates_sql
 
 
+def test_repository_loads_benchmark_prices_without_universe_membership() -> None:
+    connection = FakeConnection()
+    repository = ForwardLabelRepository(connection)
+
+    prices = repository.load_security_price_observations(
+        ticker="spy",
+        price_start_date=date(2024, 1, 2),
+        price_end_date=date(2024, 1, 31),
+    )
+
+    assert len(prices) == 1
+    assert prices[0].security_id == 202
+    assert prices[0].row.ticker == "SPY"
+    benchmark_sql = next(
+        sql for sql, params in connection.executed if params.get("ticker") == "SPY"
+    )
+    assert "FROM silver.prices_daily AS p" in benchmark_sql
+    assert "WHERE upper(s.ticker) = upper(%(ticker)s)" in benchmark_sql
+    assert "universe_membership" not in benchmark_sql
+
+
 def test_check_command_runs_without_database_url() -> None:
     result = subprocess.run(
         [sys.executable, str(ROOT / "scripts" / "materialize_forward_labels.py"), "--check"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "OK: materialize_forward_labels check passed" in result.stdout
+
+
+def test_check_command_accepts_benchmark_ticker_without_database_url() -> None:
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "scripts" / "materialize_forward_labels.py"),
+            "--check",
+            "--benchmark-ticker",
+            "spy",
+        ],
         capture_output=True,
         text=True,
         check=False,
@@ -188,12 +330,15 @@ def _price_observation(
     *,
     adj_close: str,
     available_hour: int,
+    security_id: int = 101,
+    ticker: str = "AAA",
+    policy_id: int = 3,
 ) -> ForwardLabelPriceObservation:
     value = Decimal(adj_close)
     return ForwardLabelPriceObservation(
-        security_id=101,
+        security_id=security_id,
         row=DailyPriceRow(
-            ticker="AAA",
+            ticker=ticker,
             date=day,
             open=value,
             high=value,
@@ -205,7 +350,7 @@ def _price_observation(
         ),
         available_at=datetime.combine(day, datetime.min.time(), tzinfo=timezone.utc)
         + timedelta(hours=available_hour),
-        available_at_policy_id=3,
+        available_at_policy_id=policy_id,
     )
 
 
@@ -245,6 +390,9 @@ class FakeCursor:
             return
         if sql.startswith("WITH member_securities"):
             self._many = [_price_row()]
+            return
+        if sql.startswith("SELECT\n    p.security_id"):
+            self._many = [_benchmark_price_row()]
             return
         if sql.startswith("SELECT DISTINCT p.security_id"):
             self._many = [{"security_id": 101, "date": date(2024, 1, 2)}]
@@ -305,6 +453,23 @@ def _price_row() -> dict[str, Any]:
         "close": Decimal("185.64"),
         "adj_close": Decimal("184.68"),
         "volume": 82488700,
+        "source_system": "fmp",
+        "available_at": datetime(2024, 1, 2, 23, tzinfo=timezone.utc),
+        "available_at_policy_id": 3,
+    }
+
+
+def _benchmark_price_row() -> dict[str, Any]:
+    return {
+        "security_id": 202,
+        "ticker": "SPY",
+        "date": date(2024, 1, 2),
+        "open": Decimal("475.15"),
+        "high": Decimal("476.44"),
+        "low": Decimal("473.89"),
+        "close": Decimal("475.64"),
+        "adj_close": Decimal("474.68"),
+        "volume": 72112000,
         "source_system": "fmp",
         "available_at": datetime(2024, 1, 2, 23, tzinfo=timezone.utc),
         "available_at_policy_id": 3,

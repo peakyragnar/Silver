@@ -36,14 +36,17 @@ def build_forward_label_records(
     computed_by_run_id: int,
     horizons: Sequence[int] = CANONICAL_HORIZONS,
     label_version: int = 1,
+    benchmark_prices: Sequence[ForwardLabelPriceObservation] | None = None,
 ) -> ForwardLabelMaterializationResult:
     """Calculate database-ready label records from normalized prices.
 
     The existing calculator owns forward-return and trading-day arithmetic. This
     materializer adds database lineage and keeps label ``available_at`` no earlier
-    than both the target session close and the target normalized price row.
+    than the target session close, target normalized price row, and any configured
+    benchmark price rows used for benchmark-relative metadata or returns.
     """
     normalized_prices = _validated_prices(prices)
+    benchmark = _benchmark_observations(benchmark_prices)
     normalized_label_dates = _label_dates(label_dates_by_security)
     if isinstance(computed_by_run_id, bool) or not isinstance(computed_by_run_id, int):
         raise ForwardLabelPersistenceError("computed_by_run_id must be an integer")
@@ -55,6 +58,11 @@ def build_forward_label_records(
         raise ForwardLabelPersistenceError("label_version must be positive")
 
     observations = _index_observations(normalized_prices)
+    benchmark_price_rows = (
+        tuple(observation.row for observation in benchmark.rows)
+        if benchmark is not None
+        else None
+    )
     records: list[ForwardLabelRecord] = []
     skipped: list[SkippedForwardReturnLabel] = []
 
@@ -68,6 +76,8 @@ def build_forward_label_records(
             calendar=calendar,
             asof_dates=normalized_label_dates[security_id],
             horizons=horizons,
+            benchmark_prices=benchmark_price_rows,
+            benchmark_ticker=benchmark.ticker if benchmark is not None else None,
         )
         skipped.extend(batch.skipped)
         for label in batch.labels:
@@ -82,6 +92,7 @@ def build_forward_label_records(
                     target=target,
                     computed_by_run_id=computed_by_run_id,
                     label_version=label_version,
+                    benchmark=benchmark,
                 )
             )
 
@@ -93,9 +104,18 @@ def build_forward_label_records(
 
 @dataclass(frozen=True, slots=True)
 class _SecurityObservations:
+    security_id: int
     ticker: str
     rows: tuple[ForwardLabelPriceObservation, ...]
     by_date: Mapping[date, ForwardLabelPriceObservation]
+
+
+@dataclass(frozen=True, slots=True)
+class _BenchmarkLabelFields:
+    benchmark_security_id: int
+    realized_excess_return: Decimal | None
+    metadata: Mapping[str, object]
+    availability_observations: tuple[ForwardLabelPriceObservation, ...]
 
 
 def _record_from_label(
@@ -107,8 +127,10 @@ def _record_from_label(
     target: ForwardLabelPriceObservation,
     computed_by_run_id: int,
     label_version: int,
+    benchmark: _SecurityObservations | None,
 ) -> ForwardLabelRecord:
     available_at = _max_datetime(label.available_at, target.available_at)
+    available_at_policy_id = target.available_at_policy_id
     metadata = {
         "calculator": "silver.labels.forward_returns.calculate_forward_return_labels",
         "security": ticker,
@@ -117,6 +139,19 @@ def _record_from_label(
         "target_price_available_at": target.available_at.isoformat(),
         "target_price_available_at_policy_id": target.available_at_policy_id,
     }
+    benchmark_security_id: int | None = None
+    realized_excess_return: Decimal | None = None
+    if benchmark is not None:
+        benchmark_fields = _benchmark_label_fields(benchmark, label)
+        benchmark_security_id = benchmark_fields.benchmark_security_id
+        realized_excess_return = benchmark_fields.realized_excess_return
+        metadata["benchmark"] = benchmark_fields.metadata
+        available_at, available_at_policy_id = _max_observation_availability(
+            available_at,
+            available_at_policy_id,
+            benchmark_fields.availability_observations,
+        )
+
     return ForwardLabelRecord(
         security_id=security_id,
         label_date=label.asof_date,
@@ -127,12 +162,83 @@ def _record_from_label(
         start_adj_close=label.asof_adj_close,
         end_adj_close=label.target_adj_close,
         realized_raw_return=label.forward_return,
-        benchmark_security_id=None,
-        realized_excess_return=None,
+        benchmark_security_id=benchmark_security_id,
+        realized_excess_return=realized_excess_return,
         available_at=available_at,
-        available_at_policy_id=target.available_at_policy_id,
+        available_at_policy_id=available_at_policy_id,
         computed_by_run_id=computed_by_run_id,
         metadata=metadata,
+    )
+
+
+def _benchmark_label_fields(
+    benchmark: _SecurityObservations,
+    label: ForwardReturnLabel,
+) -> _BenchmarkLabelFields:
+    start = benchmark.by_date.get(label.asof_date)
+    target = benchmark.by_date.get(label.target_date)
+    availability_observations = tuple(
+        observation for observation in (start, target) if observation is not None
+    )
+    metadata: dict[str, object] = {
+        "ticker": benchmark.ticker,
+        "security_id": benchmark.security_id,
+        "asof_date": label.asof_date.isoformat(),
+        "target_date": label.target_date.isoformat(),
+    }
+
+    if start is None:
+        metadata.update(
+            {
+                "status": "missing_asof_price",
+                "missing_price_date": label.asof_date.isoformat(),
+            }
+        )
+        return _BenchmarkLabelFields(
+            benchmark_security_id=benchmark.security_id,
+            realized_excess_return=None,
+            metadata=metadata,
+            availability_observations=availability_observations,
+        )
+
+    if target is None:
+        metadata.update(
+            {
+                "status": "missing_target_price",
+                "missing_price_date": label.target_date.isoformat(),
+            }
+        )
+        return _BenchmarkLabelFields(
+            benchmark_security_id=benchmark.security_id,
+            realized_excess_return=None,
+            metadata=metadata,
+            availability_observations=availability_observations,
+        )
+
+    if label.benchmark_forward_return is None or label.excess_return is None:
+        metadata["status"] = "unavailable_return"
+        return _BenchmarkLabelFields(
+            benchmark_security_id=benchmark.security_id,
+            realized_excess_return=None,
+            metadata=metadata,
+            availability_observations=availability_observations,
+        )
+
+    metadata.update(
+        {
+            "status": "covered",
+            "start_price_available_at": start.available_at.isoformat(),
+            "start_price_available_at_policy_id": start.available_at_policy_id,
+            "target_price_available_at": target.available_at.isoformat(),
+            "target_price_available_at_policy_id": target.available_at_policy_id,
+            "benchmark_forward_return": str(label.benchmark_forward_return),
+        }
+    )
+    return _BenchmarkLabelFields(
+        benchmark_security_id=benchmark.security_id,
+        realized_excess_return=label.excess_return,
+        metadata=metadata,
+        availability_observations=availability_observations,
     )
 
 
@@ -151,6 +257,24 @@ def _validated_prices(
             )
         _validate_observation(observation)
     return normalized
+
+
+def _benchmark_observations(
+    benchmark_prices: Sequence[ForwardLabelPriceObservation] | None,
+) -> _SecurityObservations | None:
+    if benchmark_prices is None:
+        return None
+    normalized_prices = _validated_prices(benchmark_prices)
+    if not normalized_prices:
+        raise ForwardLabelPersistenceError(
+            "benchmark_prices must contain at least one observation when provided"
+        )
+    indexed = _index_observations(normalized_prices)
+    if len(indexed) != 1:
+        raise ForwardLabelPersistenceError(
+            "benchmark_prices must contain observations for exactly one security"
+        )
+    return next(iter(indexed.values()))
 
 
 def _validate_observation(observation: ForwardLabelPriceObservation) -> None:
@@ -236,6 +360,7 @@ def _index_observations(
             by_date[price_date] = observation
 
         indexed[security_id] = _SecurityObservations(
+            security_id=security_id,
             ticker=next(iter(tickers)),
             rows=sorted_rows,
             by_date=by_date,
@@ -245,3 +370,15 @@ def _index_observations(
 
 def _max_datetime(first: datetime, second: datetime) -> datetime:
     return second if second > first else first
+
+
+def _max_observation_availability(
+    available_at: datetime,
+    available_at_policy_id: int,
+    observations: Sequence[ForwardLabelPriceObservation],
+) -> tuple[datetime, int]:
+    for observation in observations:
+        if observation.available_at > available_at:
+            available_at = observation.available_at
+            available_at_policy_id = observation.available_at_policy_id
+    return available_at, available_at_policy_id

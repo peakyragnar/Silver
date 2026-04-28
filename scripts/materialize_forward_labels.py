@@ -82,6 +82,11 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         default=1,
         help="forward label version to materialize",
     )
+    parser.add_argument(
+        "--benchmark-ticker",
+        type=_parse_ticker,
+        help="optional persisted benchmark ticker for excess-return labels",
+    )
     return parser.parse_args(argv)
 
 
@@ -114,6 +119,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 start_date=args.start_date,
                 end_date=args.end_date,
                 label_version=args.label_version,
+                benchmark_ticker=args.benchmark_ticker,
             )
             _commit(connection)
         except Exception:
@@ -148,10 +154,12 @@ def materialize_forward_labels(
     start_date: date | None,
     end_date: date | None,
     label_version: int,
+    benchmark_ticker: str | None = None,
 ) -> tuple[MaterializationCliResult, Counter[str]]:
     repository = ForwardLabelRepository(connection)
     calendar = repository.load_trading_calendar()
     price_end_date = _price_end_date(calendar, end_date)
+    benchmark_ticker = _normalize_optional_ticker(benchmark_ticker)
 
     prices = repository.load_universe_price_observations(
         universe_name=universe_name,
@@ -164,20 +172,41 @@ def materialize_forward_labels(
         label_start_date=start_date,
         label_end_date=end_date,
     )
-    policy_versions = repository.load_available_at_policy_versions(
-        tuple({price.available_at_policy_id for price in prices})
-    )
+    benchmark_prices: tuple[ForwardLabelPriceObservation, ...] | None = None
+    if benchmark_ticker is not None:
+        benchmark_prices = repository.load_security_price_observations(
+            ticker=benchmark_ticker,
+            price_start_date=start_date,
+            price_end_date=price_end_date,
+        )
+        if not benchmark_prices:
+            raise MaterializeForwardLabelsError(
+                "no persisted daily prices found for benchmark ticker "
+                f"{benchmark_ticker!r} over the requested label window"
+            )
+
+    policy_ids = {price.available_at_policy_id for price in prices}
+    if benchmark_prices is not None:
+        policy_ids.update(price.available_at_policy_id for price in benchmark_prices)
+    policy_versions = repository.load_available_at_policy_versions(tuple(policy_ids))
+    parameters = {
+        "universe": universe_name,
+        "start_date": start_date,
+        "end_date": end_date,
+        "horizons": CANONICAL_HORIZONS,
+        "label_version": label_version,
+    }
+    if benchmark_ticker is not None:
+        parameters["benchmark_ticker"] = benchmark_ticker
     run_id = repository.create_label_generation_run(
         code_git_sha=_code_git_sha(),
         available_at_policy_versions=policy_versions,
-        parameters={
-            "universe": universe_name,
-            "start_date": start_date,
-            "end_date": end_date,
-            "horizons": CANONICAL_HORIZONS,
-            "label_version": label_version,
-        },
-        input_fingerprints=_input_fingerprints(prices, label_dates_by_security),
+        parameters=parameters,
+        input_fingerprints=_input_fingerprints(
+            prices,
+            label_dates_by_security,
+            benchmark_prices=benchmark_prices,
+        ),
     )
 
     try:
@@ -188,6 +217,7 @@ def materialize_forward_labels(
             computed_by_run_id=run_id,
             horizons=CANONICAL_HORIZONS,
             label_version=label_version,
+            benchmark_prices=benchmark_prices,
         )
         write_result = repository.write_forward_labels(materialized.records)
         repository.finish_label_generation_run(run_id, status="succeeded")
@@ -231,16 +261,35 @@ def _price_end_date(calendar: TradingCalendar, end_date: date | None) -> date | 
 def _input_fingerprints(
     prices: Sequence[ForwardLabelPriceObservation],
     label_dates_by_security: dict[int, tuple[date, ...]],
+    *,
+    benchmark_prices: Sequence[ForwardLabelPriceObservation] | None = None,
 ) -> dict[str, object]:
     price_dates = [price.row.date for price in prices]
     label_date_count = sum(len(label_dates) for label_dates in label_dates_by_security.values())
-    return {
+    fingerprints: dict[str, object] = {
         "price_row_count": len(prices),
         "price_date_min": min(price_dates) if price_dates else None,
         "price_date_max": max(price_dates) if price_dates else None,
         "security_count": len({price.security_id for price in prices}),
         "label_date_count": label_date_count,
     }
+    if benchmark_prices is not None:
+        benchmark_dates = [price.row.date for price in benchmark_prices]
+        fingerprints.update(
+            {
+                "benchmark_price_row_count": len(benchmark_prices),
+                "benchmark_price_date_min": (
+                    min(benchmark_dates) if benchmark_dates else None
+                ),
+                "benchmark_price_date_max": (
+                    max(benchmark_dates) if benchmark_dates else None
+                ),
+                "benchmark_security_ids": sorted(
+                    {price.security_id for price in benchmark_prices}
+                ),
+            }
+        )
+    return fingerprints
 
 
 def _run_check() -> None:
@@ -269,6 +318,43 @@ def _run_check() -> None:
             raise MaterializeForwardLabelsError(
                 "offline materialization check produced an early label"
             )
+        if record.benchmark_security_id is not None:
+            raise MaterializeForwardLabelsError(
+                "offline materialization check changed raw-only benchmark fields"
+            )
+
+    benchmark_prices = [
+        _check_price_observation(
+            session,
+            index=index,
+            policy_id=4,
+            security_id=202,
+            ticker="SPY",
+            start=Decimal("200"),
+        )
+        for index, session in enumerate(sessions)
+    ]
+    benchmark_result = build_forward_label_records(
+        prices=prices,
+        calendar=calendar,
+        label_dates_by_security={101: (sessions[0],)},
+        computed_by_run_id=1,
+        horizons=(5,),
+        benchmark_prices=benchmark_prices,
+    )
+    if len(benchmark_result.records) != 1 or benchmark_result.skipped:
+        raise MaterializeForwardLabelsError(
+            "offline benchmark materialization check did not produce one label"
+        )
+    benchmark_record = benchmark_result.records[0]
+    if benchmark_record.benchmark_security_id != 202:
+        raise MaterializeForwardLabelsError(
+            "offline benchmark check did not persist benchmark_security_id"
+        )
+    if benchmark_record.realized_excess_return != Decimal("0.025"):
+        raise MaterializeForwardLabelsError(
+            "offline benchmark check produced an incorrect excess return"
+        )
 
 
 def _check_calendar() -> TradingCalendar:
@@ -300,12 +386,15 @@ def _check_price_observation(
     *,
     index: int,
     policy_id: int,
+    security_id: int = 101,
+    ticker: str = "AAA",
+    start: Decimal = Decimal("100"),
 ) -> ForwardLabelPriceObservation:
-    value = Decimal("100") + Decimal(index)
+    value = start + Decimal(index)
     return ForwardLabelPriceObservation(
-        security_id=101,
+        security_id=security_id,
         row=DailyPriceRow(
-            ticker="AAA",
+            ticker=ticker,
             date=day,
             open=value,
             high=value,
@@ -370,6 +459,22 @@ def _parse_date(value: str) -> date:
         return date.fromisoformat(value)
     except ValueError as exc:
         raise argparse.ArgumentTypeError("date must use YYYY-MM-DD format") from exc
+
+
+def _parse_ticker(value: str) -> str:
+    normalized = value.strip().upper()
+    if not normalized:
+        raise argparse.ArgumentTypeError("ticker must be non-empty")
+    return normalized
+
+
+def _normalize_optional_ticker(value: str | None) -> str | None:
+    if value is None:
+        return None
+    normalized = value.strip().upper()
+    if not normalized:
+        raise MaterializeForwardLabelsError("benchmark_ticker must be non-empty")
+    return normalized
 
 
 if __name__ == "__main__":
