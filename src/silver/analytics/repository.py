@@ -138,7 +138,10 @@ class BacktestTraceabilitySnapshot:
     backtest_target_kind: str
     backtest_cost_assumptions: Mapping[str, Any]
     backtest_metrics: Mapping[str, Any]
+    backtest_metrics_by_regime: Mapping[str, Any]
     backtest_baseline_metrics: Mapping[str, Any]
+    backtest_label_scramble_metrics: Mapping[str, Any]
+    backtest_label_scramble_pass: bool | None
     backtest_parameters: Mapping[str, Any]
     backtest_multiple_comparisons_correction: str | None
 
@@ -699,22 +702,40 @@ def _backtest_traceability_snapshot(row: object) -> BacktestTraceabilitySnapshot
             26,
             "backtest_runs.metrics",
         ),
+        backtest_metrics_by_regime=_metadata_row_json_object(
+            row,
+            "backtest_metrics_by_regime",
+            27,
+            "backtest_runs.metrics_by_regime",
+        ),
         backtest_baseline_metrics=_metadata_row_json_object(
             row,
             "backtest_baseline_metrics",
-            27,
+            28,
             "backtest_runs.baseline_metrics",
+        ),
+        backtest_label_scramble_metrics=_metadata_row_json_object(
+            row,
+            "backtest_label_scramble_metrics",
+            29,
+            "backtest_runs.label_scramble_metrics",
+        ),
+        backtest_label_scramble_pass=_metadata_row_optional_bool(
+            row,
+            "backtest_label_scramble_pass",
+            30,
+            "backtest_runs.label_scramble_pass",
         ),
         backtest_parameters=_metadata_row_json_object(
             row,
             "backtest_parameters",
-            28,
+            31,
             "backtest_runs.parameters",
         ),
         backtest_multiple_comparisons_correction=_metadata_row_optional_str(
             row,
             "backtest_multiple_comparisons_correction",
-            29,
+            32,
             "backtest_runs.multiple_comparisons_correction",
         ),
     )
@@ -1040,6 +1061,22 @@ def _metadata_row_json_object(
     )
 
 
+def _metadata_row_optional_bool(
+    row: object,
+    key: str,
+    index: int,
+    name: str,
+) -> bool | None:
+    value = _row_value(row, key, index)
+    if value is None:
+        return None
+    if not isinstance(value, bool):
+        raise BacktestMetadataError(
+            f"{name} returned by database must be a boolean or null"
+        )
+    return value
+
+
 def _run_record(row: object) -> AnalyticsRunRecord:
     return AnalyticsRunRecord(
         id=_row_int(row, "id", 0, "analytics_runs.id"),
@@ -1262,7 +1299,10 @@ SELECT
     br.target_kind AS backtest_target_kind,
     br.cost_assumptions AS backtest_cost_assumptions,
     br.metrics AS backtest_metrics,
+    br.metrics_by_regime AS backtest_metrics_by_regime,
     br.baseline_metrics AS backtest_baseline_metrics,
+    br.label_scramble_metrics AS backtest_label_scramble_metrics,
+    br.label_scramble_pass AS backtest_label_scramble_pass,
     br.parameters AS backtest_parameters,
     br.multiple_comparisons_correction AS backtest_multiple_comparisons_correction
 FROM silver.backtest_runs br
