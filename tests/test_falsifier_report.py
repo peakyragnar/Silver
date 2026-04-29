@@ -9,6 +9,7 @@ from silver.backtest.momentum_falsifier import (
 from silver.reports.falsifier import (
     FalsifierFeatureMetadata,
     FalsifierInputCounts,
+    FalsifierModelWindow,
     FalsifierReport,
     FalsifierReproducibilityMetadata,
     FalsifierRunIdentity,
@@ -74,6 +75,25 @@ def test_report_rendering_is_deterministic_and_contains_required_sections() -> N
                 backtest_run_id=202,
                 backtest_run_key="backtest-run-momentum-12-1-202401",
             ),
+            model_window=FalsifierModelWindow(
+                training_start_date=sessions[0],
+                training_end_date=sessions[7],
+                test_start_date=sessions[8],
+                test_end_date=sessions[13],
+                source="scorable_walk_forward",
+            ),
+            target_kind="excess_return_market",
+            random_seed=0,
+            execution_assumptions={
+                "label_scramble_alpha": 0.05,
+                "label_scramble_seed": 44,
+                "label_scramble_trial_count": 100,
+                "min_train_sessions": 2,
+                "multiple_comparisons_correction": "none",
+                "round_trip_cost_bps": 20.0,
+                "step_sessions": 2,
+                "test_sessions": 2,
+            },
         ),
     )
 
@@ -99,8 +119,22 @@ def test_report_rendering_is_deterministic_and_contains_required_sections() -> N
     assert "| Git SHA | " + "f" * 40 + " |" in rendered
     assert "| Feature definition hash | " + "a" * 64 + " |" in rendered
     assert "| Feature set hash | " + "a" * 64 + " |" in rendered
+    assert "| Model training window | 2024-01-02 to 2024-01-09 |" in rendered
+    assert "| Model test window | 2024-01-10 to 2024-01-15 |" in rendered
+    assert "| Model window source | scorable_walk_forward |" in rendered
+    assert "| Target kind | excess_return_market |" in rendered
     assert "| Input fingerprint | " + fingerprint_momentum_inputs(rows) + " |" in rendered
     assert "| Available-at policy versions | `{\"daily_price\":1}` |" in rendered
+    assert "| Random seed | 0 |" in rendered
+    assert (
+        "| Execution assumptions | "
+        "`{\"label_scramble_alpha\":0.05,\"label_scramble_seed\":44,"
+        "\"label_scramble_trial_count\":100,\"min_train_sessions\":2,"
+        "\"multiple_comparisons_correction\":\"none\","
+        "\"round_trip_cost_bps\":20.0,\"step_sessions\":2,\"test_sessions\":2}`"
+        " |"
+    ) in rendered
+    assert "| Report schema version | 3 |" in rendered
 
 
 def test_missing_prerequisite_message_names_materialization_step() -> None:

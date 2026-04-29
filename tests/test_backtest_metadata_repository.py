@@ -109,12 +109,19 @@ def test_traceability_snapshot_resolves_backtest_run_to_model_run_metadata() -> 
     assert snapshot.model_status == "succeeded"
     assert snapshot.model_code_git_sha == "abcdef0"
     assert snapshot.model_feature_set_hash == "a" * 64
+    assert snapshot.model_feature_snapshot_ref == "feature-snapshot:v1"
+    assert snapshot.model_training_start_date == date(2020, 1, 2)
+    assert snapshot.model_training_end_date == date(2021, 12, 31)
+    assert snapshot.model_test_start_date == date(2022, 1, 3)
+    assert snapshot.model_test_end_date == date(2024, 12, 31)
     assert snapshot.model_horizon_days == 63
+    assert snapshot.model_parameters == {"strategy": "momentum_12_1"}
     assert snapshot.model_available_at_policy_versions == {"daily_price": 1}
     assert snapshot.backtest_run_id == backtest.id
     assert snapshot.backtest_model_run_id == model.id
     assert snapshot.backtest_universe_name == "falsifier_seed"
     assert snapshot.backtest_horizon_days == 63
+    assert snapshot.backtest_parameters == {"rebalance": "monthly"}
     assert snapshot.backtest_metrics == {"sharpe_net": 0.71, "turnover": 0.18}
     assert snapshot.backtest_baseline_metrics["equal_weight"]["sharpe_net"] == 0.08
 
@@ -481,11 +488,17 @@ class FakeMetadataCursor:
                 "model_status": model["status"],
                 "model_code_git_sha": model["code_git_sha"],
                 "model_feature_set_hash": model["feature_set_hash"],
+                "model_feature_snapshot_ref": model["feature_snapshot_ref"],
+                "model_training_start_date": model["training_start_date"],
+                "model_training_end_date": model["training_end_date"],
+                "model_test_start_date": model["test_start_date"],
+                "model_test_end_date": model["test_end_date"],
                 "model_horizon_days": model["horizon_days"],
                 "model_target_kind": model["target_kind"],
                 "model_random_seed": model["random_seed"],
                 "model_cost_assumptions": model["cost_assumptions"],
                 "model_metrics": model["metrics"],
+                "model_parameters": model["parameters"],
                 "model_available_at_policy_versions": model[
                     "available_at_policy_versions"
                 ],
@@ -500,6 +513,7 @@ class FakeMetadataCursor:
                 "backtest_cost_assumptions": backtest["cost_assumptions"],
                 "backtest_metrics": backtest["metrics"],
                 "backtest_baseline_metrics": backtest["baseline_metrics"],
+                "backtest_parameters": backtest["parameters"],
                 "backtest_multiple_comparisons_correction": backtest[
                     "multiple_comparisons_correction"
                 ],

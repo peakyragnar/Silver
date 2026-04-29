@@ -92,7 +92,8 @@ to reproduce the output.
 Falsifier report traceability validation must resolve the reported
 `backtest_run_id` through the durable `backtest_runs.model_run_id` join to
 `model_runs` before the report artifact is written. The validation checks the
-reported code SHA, feature-set hash, horizon, universe, cost assumptions,
+reported code SHA, feature-set hash, model training/test windows, target kind,
+random seed, execution assumptions, horizon, universe, cost assumptions,
 baseline metrics, headline metrics, available-at policy versions, and joined
 input fingerprint against stored metadata. The replay path is covered by
 `test_traceability_snapshot_resolves_backtest_run_to_model_run_metadata` and
