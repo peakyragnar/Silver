@@ -20,6 +20,7 @@ venv/
 *.db
 *.sqlite
 *.sqlite3
+.silver/
 data/raw/
 data/vendor/
 

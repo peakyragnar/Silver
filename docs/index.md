@@ -18,6 +18,10 @@ and humans building Silver.
 - [`SYMPHONY.md`](SYMPHONY.md): how to run Symphony against this repository
 - [`Symphony-Operation.md`](Symphony-Operation.md): how Silver uses Symphony
   Objectives, tickets, stewards, migrations, and conflicts
+- [`../scripts/work_ledger.py`](../scripts/work_ledger.py): local Objective and
+  ticket ledger CLI for fast orchestration state
+- [`../scripts/linear_mirror.py`](../scripts/linear_mirror.py): mirrors local
+  ledger ticket state to Linear for current Symphony visibility
 
 ## Plans
 

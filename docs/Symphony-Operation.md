@@ -118,6 +118,96 @@ The migration path is additive:
 This protects the current working lane while moving the runtime state out of
 Linear.
 
+## Work Ledger
+
+The Silver work ledger is the local source of truth we can poll quickly without
+touching Linear. It is additive to the current bridge: it does not replace
+Symphony dispatch or Linear mirroring yet.
+
+Default path:
+
+```text
+/Users/michael/Silver/.silver/work_ledger.db
+```
+
+Override with:
+
+```text
+SILVER_LEDGER_PATH=/shared/path/work_ledger.db
+```
+
+Initialize it:
+
+```text
+python scripts/work_ledger.py init
+```
+
+Import approved active Objective files:
+
+```text
+python scripts/work_ledger.py import-objectives
+```
+
+Inspect local state:
+
+```text
+python scripts/work_ledger.py status
+python scripts/work_ledger.py list-runnable
+python scripts/work_ledger.py events --limit 20
+```
+
+Admit local Backlog tickets into the ledger's fast runnable queue:
+
+```text
+python scripts/work_ledger.py admit --max-active 5 --ready-buffer 5
+```
+
+Preview the Linear mirror:
+
+```text
+python scripts/linear_mirror.py
+```
+
+Apply the mirror after preview:
+
+```text
+python scripts/linear_mirror.py --apply
+```
+
+Mirror mapping:
+
+| Ledger | Linear bridge |
+|---|---|
+| `Backlog` | `Backlog` |
+| `Ready` | `Todo` |
+| `Claimed` / `In Progress` | `In Progress` |
+| `Rework` | `Rework` |
+| `Merging` | `Merging` |
+| `Safety Review` | `Safety Review` |
+| `Done` | `Done` |
+
+Move a ticket manually during the MVP:
+
+```text
+python scripts/work_ledger.py transition wire-backtest-metadata-registry-001 Ready
+```
+
+The ledger stores:
+
+```text
+objectives
+tickets
+ticket_events
+runs
+conflict_locks
+proof_packets
+safety_stops
+linear_mirror_state
+```
+
+Ticket events are the audit trail. Linear sync should eventually read ledger
+changes and update Linear only when a visible board state changes.
+
 ## Objective
 
 An Objective is the user-facing unit of work. It should be large enough to be
