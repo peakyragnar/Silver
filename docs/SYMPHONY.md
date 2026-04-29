@@ -120,9 +120,9 @@ tmux kill-session -t silver-symphony
 ## Merge Steward
 
 Run the merge steward in the Silver repository shell where `LINEAR_API_KEY` is
-available. It reads Linear issues in `Merging`, finds the matching GitHub PR,
-queues green PRs, marks merged PRs `Done`, and sends conflicts or failed checks
-to `Rework`.
+available. It reads Linear issues in `Merging`, reconciles stale nonterminal
+project issues whose matching GitHub PR is already merged, queues green PRs,
+marks merged PRs `Done`, and sends conflicts or failed checks to `Rework`.
 
 Validate local wiring without network writes:
 
@@ -135,6 +135,9 @@ Preview current actions:
 ```bash
 python scripts/merge_steward.py --dry-run
 ```
+
+Dry-run stale reconciliation lines use the `stale_mark_done` action and perform
+no Linear writes.
 
 Keep it running while batches run:
 
