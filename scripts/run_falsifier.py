@@ -10,7 +10,6 @@ import os
 import shutil
 import subprocess
 import sys
-import uuid
 from dataclasses import dataclass
 from datetime import date, timedelta
 from pathlib import Path
@@ -1079,8 +1078,22 @@ def _model_run_create(
     data_coverage: FalsifierDataCoverage,
     window: ModelRunWindow,
 ) -> ModelRunCreate:
+    parameters = _model_run_parameters(
+        args,
+        persisted_inputs=persisted_inputs,
+        window=window,
+    )
     return ModelRunCreate(
-        model_run_key=_model_run_key(args, git_sha, input_fingerprint),
+        model_run_key=_model_run_key(
+            args,
+            available_at_policy_versions=persisted_inputs.available_at_policy_versions,
+            feature_set_hash=feature_set_hash,
+            git_sha=git_sha,
+            input_fingerprint=input_fingerprint,
+            parameters=parameters,
+            target_kind=persisted_inputs.target_kind,
+            window=window,
+        ),
         name=FALSIFIER_MODEL_RUN_NAME,
         code_git_sha=git_sha,
         feature_set_hash=feature_set_hash,
@@ -1092,22 +1105,7 @@ def _model_run_create(
         target_kind=persisted_inputs.target_kind,
         random_seed=FALSIFIER_RANDOM_SEED,
         cost_assumptions=_model_run_cost_assumptions(),
-        parameters={
-            "command": _target_command(args),
-            "feature_definition": {
-                "definition_hash": persisted_inputs.feature_definition.definition_hash,
-                "id": persisted_inputs.feature_definition.id,
-                "name": persisted_inputs.feature_definition.name,
-                "version": persisted_inputs.feature_definition.version,
-            },
-            "min_train_sessions": DEFAULT_MIN_TRAIN_SESSIONS,
-            "output_path": _display_path(args.output_path),
-            "step_sessions": DEFAULT_STEP_SESSIONS,
-            "strategy": args.strategy,
-            "test_sessions": DEFAULT_TEST_SESSIONS,
-            "universe": args.universe,
-            "window_source": window.source,
-        },
+        parameters=parameters,
         available_at_policy_versions=(
             persisted_inputs.available_at_policy_versions
         ),
@@ -1141,19 +1139,57 @@ def _model_run_create(
     )
 
 
+def _model_run_parameters(
+    args: argparse.Namespace,
+    *,
+    persisted_inputs: PersistedFalsifierInputs,
+    window: ModelRunWindow,
+) -> dict[str, object]:
+    return {
+        "command": _target_command(args),
+        "feature_definition": {
+            "definition_hash": persisted_inputs.feature_definition.definition_hash,
+            "id": persisted_inputs.feature_definition.id,
+            "name": persisted_inputs.feature_definition.name,
+            "version": persisted_inputs.feature_definition.version,
+        },
+        "min_train_sessions": DEFAULT_MIN_TRAIN_SESSIONS,
+        "step_sessions": DEFAULT_STEP_SESSIONS,
+        "strategy": args.strategy,
+        "test_sessions": DEFAULT_TEST_SESSIONS,
+        "universe": args.universe,
+        "window_source": window.source,
+    }
+
+
 def _model_run_key(
     args: argparse.Namespace,
+    *,
+    available_at_policy_versions: Mapping[str, int],
+    feature_set_hash: str,
     git_sha: str,
     input_fingerprint: str,
+    parameters: Mapping[str, object],
+    target_kind: str,
+    window: ModelRunWindow,
 ) -> str:
-    invocation_id = uuid.uuid4().hex
     payload = {
+        "available_at_policy_versions": dict(available_at_policy_versions),
+        "cost_assumptions": _model_run_cost_assumptions(),
+        "feature_set_hash": feature_set_hash,
         "git_sha": git_sha,
         "horizon": args.horizon,
         "input_fingerprint": input_fingerprint,
-        "invocation_id": invocation_id,
+        "parameters": dict(parameters),
+        "random_seed": FALSIFIER_RANDOM_SEED,
         "strategy": args.strategy,
+        "target_kind": target_kind,
+        "test_end_date": window.test_end_date.isoformat(),
+        "test_start_date": window.test_start_date.isoformat(),
+        "training_end_date": window.training_end_date.isoformat(),
+        "training_start_date": window.training_start_date.isoformat(),
         "universe": args.universe,
+        "version": 2,
     }
     digest = hashlib.sha256(
         json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")

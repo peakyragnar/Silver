@@ -108,6 +108,7 @@ def test_report_run_creates_and_finishes_model_and_backtest_success(
     assert "joined_feature_label_rows_sha256" in model_create.input_fingerprints
     assert model_create.parameters["feature_definition"]["definition_hash"] == "a" * 64
     assert model_create.parameters["window_source"] == "scorable_walk_forward"
+    assert "output_path" not in model_create.parameters
     assert model_create.cost_assumptions["round_trip_cost_bps"] == 20.0
 
     backtest_create = repo.backtest_creates[0]
@@ -149,6 +150,62 @@ def test_report_run_creates_and_finishes_model_and_backtest_success(
     assert '"min_train_sessions":252' in report_text
     assert '"round_trip_cost_bps":20.0' in report_text
     assert "| Report schema version | 3 |" in report_text
+
+
+def test_model_run_create_uses_stable_key_for_same_frozen_metadata(
+    tmp_path: Path,
+) -> None:
+    calendar = _calendar()
+    rows = _momentum_rows(calendar, session_count=420)
+    persisted_inputs = _persisted_inputs(rows=rows)
+    args = cli.parse_args(
+        [
+            "--database-url",
+            "postgresql://user:pass@localhost/silver",
+            "--output-path",
+            str(tmp_path / "report.md"),
+        ]
+    )
+    feature_set_hash = cli._feature_set_hash(persisted_inputs.feature_definition)
+    input_fingerprint = cli.fingerprint_momentum_inputs(rows)
+    data_coverage = cli.coverage_from_rows(rows)
+    model_window = cli._model_run_window(
+        persisted_inputs.rows,
+        calendar=calendar,
+        horizon=args.horizon,
+    )
+
+    first = cli._model_run_create(
+        args,
+        persisted_inputs=persisted_inputs,
+        feature_set_hash=feature_set_hash,
+        git_sha="abcdef0",
+        input_fingerprint=input_fingerprint,
+        data_coverage=data_coverage,
+        window=model_window,
+    )
+    second = cli._model_run_create(
+        args,
+        persisted_inputs=persisted_inputs,
+        feature_set_hash=feature_set_hash,
+        git_sha="abcdef0",
+        input_fingerprint=input_fingerprint,
+        data_coverage=data_coverage,
+        window=model_window,
+    )
+    changed_input = cli._model_run_create(
+        args,
+        persisted_inputs=persisted_inputs,
+        feature_set_hash=feature_set_hash,
+        git_sha="abcdef0",
+        input_fingerprint="f" * 64,
+        data_coverage=data_coverage,
+        window=model_window,
+    )
+
+    assert first.model_run_key == second.model_run_key
+    assert first.parameters == second.parameters
+    assert first.model_run_key != changed_input.model_run_key
 
 
 def test_report_traceability_validation_fails_clearly_on_metadata_mismatch(
