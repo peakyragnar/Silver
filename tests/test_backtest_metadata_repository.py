@@ -540,8 +540,8 @@ class FakeMetadataCursor:
                 "model_target_kind": model["target_kind"],
                 "model_random_seed": model["random_seed"],
                 "model_cost_assumptions": model["cost_assumptions"],
-                "model_parameters": model["parameters"],
                 "model_metrics": model["metrics"],
+                "model_parameters": model["parameters"],
                 "model_available_at_policy_versions": model[
                     "available_at_policy_versions"
                 ],
@@ -554,10 +554,10 @@ class FakeMetadataCursor:
                 "backtest_horizon_days": backtest["horizon_days"],
                 "backtest_target_kind": backtest["target_kind"],
                 "backtest_cost_assumptions": backtest["cost_assumptions"],
-                "backtest_parameters": backtest["parameters"],
                 "backtest_metrics": backtest["metrics"],
                 "backtest_metrics_by_regime": backtest["metrics_by_regime"],
                 "backtest_baseline_metrics": backtest["baseline_metrics"],
+                "backtest_parameters": backtest["parameters"],
                 "backtest_label_scramble_metrics": backtest[
                     "label_scramble_metrics"
                 ],

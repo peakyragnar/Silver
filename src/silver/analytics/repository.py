@@ -125,8 +125,8 @@ class BacktestTraceabilitySnapshot:
     model_target_kind: str
     model_random_seed: int
     model_cost_assumptions: Mapping[str, Any]
-    model_parameters: Mapping[str, Any]
     model_metrics: Mapping[str, Any]
+    model_parameters: Mapping[str, Any]
     model_available_at_policy_versions: Mapping[str, Any]
     model_input_fingerprints: Mapping[str, Any]
     backtest_run_id: int
@@ -137,10 +137,10 @@ class BacktestTraceabilitySnapshot:
     backtest_horizon_days: int
     backtest_target_kind: str
     backtest_cost_assumptions: Mapping[str, Any]
-    backtest_parameters: Mapping[str, Any]
     backtest_metrics: Mapping[str, Any]
     backtest_metrics_by_regime: Mapping[str, Any]
     backtest_baseline_metrics: Mapping[str, Any]
+    backtest_parameters: Mapping[str, Any]
     backtest_label_scramble_metrics: Mapping[str, Any]
     backtest_label_scramble_pass: bool | None
     backtest_multiple_comparisons_correction: str | None
@@ -658,17 +658,17 @@ def _backtest_traceability_snapshot(row: object) -> BacktestTraceabilitySnapshot
             13,
             "model_runs.cost_assumptions",
         ),
-        model_parameters=_metadata_row_json_object(
-            row,
-            "model_parameters",
-            14,
-            "model_runs.parameters",
-        ),
         model_metrics=_metadata_row_json_object(
             row,
             "model_metrics",
-            15,
+            14,
             "model_runs.metrics",
+        ),
+        model_parameters=_metadata_row_json_object(
+            row,
+            "model_parameters",
+            15,
+            "model_runs.parameters",
         ),
         model_available_at_policy_versions=_metadata_row_json_object(
             row,
@@ -730,29 +730,29 @@ def _backtest_traceability_snapshot(row: object) -> BacktestTraceabilitySnapshot
             25,
             "backtest_runs.cost_assumptions",
         ),
-        backtest_parameters=_metadata_row_json_object(
-            row,
-            "backtest_parameters",
-            26,
-            "backtest_runs.parameters",
-        ),
         backtest_metrics=_metadata_row_json_object(
             row,
             "backtest_metrics",
-            27,
+            26,
             "backtest_runs.metrics",
         ),
         backtest_metrics_by_regime=_metadata_row_json_object(
             row,
             "backtest_metrics_by_regime",
-            28,
+            27,
             "backtest_runs.metrics_by_regime",
         ),
         backtest_baseline_metrics=_metadata_row_json_object(
             row,
             "backtest_baseline_metrics",
-            29,
+            28,
             "backtest_runs.baseline_metrics",
+        ),
+        backtest_parameters=_metadata_row_json_object(
+            row,
+            "backtest_parameters",
+            29,
+            "backtest_runs.parameters",
         ),
         backtest_label_scramble_metrics=_metadata_row_json_object(
             row,
@@ -1320,8 +1320,8 @@ SELECT
     mr.target_kind AS model_target_kind,
     mr.random_seed AS model_random_seed,
     mr.cost_assumptions AS model_cost_assumptions,
-    mr.parameters AS model_parameters,
     mr.metrics AS model_metrics,
+    mr.parameters AS model_parameters,
     mr.available_at_policy_versions AS model_available_at_policy_versions,
     mr.input_fingerprints AS model_input_fingerprints,
     br.id AS backtest_run_id,
@@ -1332,10 +1332,10 @@ SELECT
     br.horizon_days AS backtest_horizon_days,
     br.target_kind AS backtest_target_kind,
     br.cost_assumptions AS backtest_cost_assumptions,
-    br.parameters AS backtest_parameters,
     br.metrics AS backtest_metrics,
     br.metrics_by_regime AS backtest_metrics_by_regime,
     br.baseline_metrics AS backtest_baseline_metrics,
+    br.parameters AS backtest_parameters,
     br.label_scramble_metrics AS backtest_label_scramble_metrics,
     br.label_scramble_pass AS backtest_label_scramble_pass,
     br.multiple_comparisons_correction AS backtest_multiple_comparisons_correction

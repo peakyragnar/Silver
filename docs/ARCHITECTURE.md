@@ -49,6 +49,15 @@ Phase 2 starts the durable backtest reproducibility registry with
 `silver.model_runs` and `silver.backtest_runs`. These tables hold run metadata
 only until model and backtest runners are explicitly wired to write them.
 
+Migration `004_backtest_metadata.sql` owns the Phase 2 registry table shape.
+Migration `005_backtest_metadata_replay_constraints.sql` adds non-destructive
+replay-completeness constraints. Future changes to `silver.model_runs` or
+`silver.backtest_runs` must ship as a new numbered migration under
+`db/migrations/`; applied migrations are not rewritten. A change that alters
+accepted-claim meaning, point-in-time policy semantics, retention, or
+destructive behavior needs a Safety Review or an explicit migration-owner
+ticket before implementation.
+
 Runtime writers must treat migrations `004_backtest_metadata.sql` and
 `005_backtest_metadata_replay_constraints.sql` as the table shape contract:
 
@@ -74,6 +83,11 @@ Runtime writers must treat migrations `004_backtest_metadata.sql` and
 - `insufficient_data` is a terminal no-claim status. Runtime writers must set
   `label_scramble_pass = false` for insufficient-data rows and put deterministic
   insufficiency details in JSON metadata such as `parameters` or `metrics`.
+- Accepted claims are limited to terminal `succeeded` backtest rows whose
+  report identity resolves through `backtest_runs.model_run_id` to the frozen
+  model-run metadata. Reports, markdown files, and CLI arguments can display
+  metadata, but they are not the authoritative registry when durable rows are
+  available.
 
 For a clean local Postgres database, prefer the single bootstrap command:
 
