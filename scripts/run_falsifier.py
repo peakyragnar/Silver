@@ -389,7 +389,11 @@ def run_report_with_metadata(
         backtest_run.id,
         backtest_finish,
     )
-    validate_falsifier_report_traceability(report, metadata_repository)
+    validate_falsifier_report_traceability(
+        report,
+        metadata_repository,
+        expected_backtest_finish=backtest_finish,
+    )
     write_report(args.output_path, render_week_1_momentum_report(report))
     return FalsifierReportRun(
         model_run=finished_model,
@@ -1270,6 +1274,8 @@ def _model_run_metrics(result: Any) -> Mapping[str, Any]:
 def validate_falsifier_report_traceability(
     report: FalsifierReport,
     metadata_repository: BacktestMetadataRepository,
+    *,
+    expected_backtest_finish: BacktestRunFinish | None = None,
 ) -> None:
     """Validate that a generated report resolves to matching durable metadata."""
     identity = report.reproducibility.run_identity
@@ -1282,7 +1288,12 @@ def validate_falsifier_report_traceability(
     snapshot = metadata_repository.load_backtest_traceability_snapshot(
         identity.backtest_run_id,
     )
-    mismatches = _traceability_mismatches(report, identity, snapshot)
+    mismatches = _traceability_mismatches(
+        report,
+        identity,
+        snapshot,
+        expected_backtest_finish=expected_backtest_finish,
+    )
     if mismatches:
         raise FalsifierCliError(
             "falsifier report traceability validation failed: "
@@ -1294,6 +1305,8 @@ def _traceability_mismatches(
     report: FalsifierReport,
     identity: FalsifierRunIdentity,
     snapshot: BacktestTraceabilitySnapshot,
+    *,
+    expected_backtest_finish: BacktestRunFinish | None = None,
 ) -> list[str]:
     result = report.backtest_result
     mismatches: list[str] = []
@@ -1369,6 +1382,11 @@ def _traceability_mismatches(
             _metrics_payload(result=result, failure_message=None),
         ),
         (
+            "backtest_runs.metrics_by_regime",
+            snapshot.backtest_metrics_by_regime,
+            _metrics_by_regime(result),
+        ),
+        (
             "backtest_runs.baseline_metrics",
             snapshot.backtest_baseline_metrics,
             _baseline_metrics(result),
@@ -1381,6 +1399,21 @@ def _traceability_mismatches(
     )
     for field, actual, expected in checks:
         _expect_trace_value(mismatches, field, actual=actual, expected=expected)
+    if expected_backtest_finish is not None:
+        label_checks = (
+            (
+                "backtest_runs.label_scramble_metrics",
+                snapshot.backtest_label_scramble_metrics,
+                expected_backtest_finish.label_scramble_metrics,
+            ),
+            (
+                "backtest_runs.label_scramble_pass",
+                snapshot.backtest_label_scramble_pass,
+                expected_backtest_finish.label_scramble_pass,
+            ),
+        )
+        for field, actual, expected in label_checks:
+            _expect_trace_value(mismatches, field, actual=actual, expected=expected)
     return mismatches
 
 
