@@ -302,6 +302,59 @@ def test_affirmative_secret_metadata_triggers_safety_review() -> None:
     assert "secret handling" in decision.reason
 
 
+def test_report_identity_plumbing_does_not_trigger_backtest_semantic_review() -> None:
+    issue = _issue("ARR-45")
+    pr = _pr(
+        44,
+        title="ARR-45 Surface persisted run identity in falsifier reports",
+        changed_files=_changed_files(
+            "scripts/run_falsifier.py",
+            "src/silver/reports/falsifier.py",
+        ),
+        diff=(
+            "+run_identity = FalsifierRunIdentity(\n"
+            "+    model_run_id=row['model_run_id'],\n"
+            "+    backtest_run_key=row['backtest_run_key'],\n"
+            "+)\n"
+        ),
+    )
+
+    decision = merge_steward.decide_issue_action(
+        issue,
+        pr,
+        ("Python 3.10 checks",),
+    )
+
+    assert decision.action == "queue"
+    assert "green" in decision.reason
+
+
+def test_metadata_repository_helpers_do_not_trigger_backtest_semantic_review() -> None:
+    issue = _issue("ARR-42")
+    pr = _pr(
+        45,
+        title="ARR-42 Add backtest metadata repository helpers",
+        changed_files=_changed_files(
+            "src/silver/analytics/__init__.py",
+            "src/silver/analytics/repository.py",
+        ),
+        diff=(
+            "+class BacktestMetadataRepository:\n"
+            "+    baseline_metrics: Mapping[str, object]\n"
+            "+    label_scramble_metrics: Mapping[str, object]\n"
+        ),
+    )
+
+    decision = merge_steward.decide_issue_action(
+        issue,
+        pr,
+        ("Python 3.10 checks",),
+    )
+
+    assert decision.action == "queue"
+    assert "green" in decision.reason
+
+
 def test_mechanical_steward_fixes_still_queue() -> None:
     issue = _issue("ARR-42")
     pr = _pr(

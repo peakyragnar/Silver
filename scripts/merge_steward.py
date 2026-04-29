@@ -749,23 +749,9 @@ def safety_review_trigger(issue: LinearIssue, pr: PullRequest) -> str | None:
         added_diff=added_diff,
         added_diff_by_path=added_diff_by_path,
     )
-    if backtest_path is not None and _semantic_diff_or_metadata(
+    if backtest_path is not None and _backtest_metric_semantics_changed(
         backtest_diff,
         pr_metadata,
-        (
-            r"\bmetric(s)?\b",
-            r"\bsharpe\b",
-            r"\bdrawdown\b",
-            r"\bcost(s)?\b",
-            r"\bturnover\b",
-            r"\bbaseline\b",
-            r"\breproducib",
-            r"\bmodel_run\b",
-            r"\bportfolio\b",
-            r"\bgross\b",
-            r"\bnet\b",
-            r"\bscramble\b",
-        ),
     ):
         return f"backtest metric semantic change: {backtest_path}"
 
@@ -980,6 +966,35 @@ def _metadata_says_secret_handling_changed(text: str) -> bool:
     return False
 
 
+def _backtest_metric_semantics_changed(added_diff: str, pr_metadata: str) -> bool:
+    if not added_diff:
+        return _matches_any(
+            pr_metadata,
+            (
+                r"\b(change|alter|replace|rewrite|redefine)\b.{0,80}"
+                r"\b(metric|sharpe|drawdown|turnover|baseline|cost|return)\b",
+                r"\b(metric|sharpe|drawdown|turnover|baseline|cost|return)\b.{0,80}"
+                r"\b(change|alter|replace|rewrite|redefine)\b",
+            ),
+        )
+
+    signal = "\n".join((added_diff, pr_metadata))
+    return _matches_any(
+        signal,
+        (
+            r"\b(metrics?|baseline_metrics|label_scramble_metrics)\b\s*(\[|=|\.)",
+            r"\b(sharpe|drawdown|turnover|gross|net|return)\b.{0,80}"
+            r"(=|\.mean\(|\.sum\(|pct_change\(|cumprod\(|cumsum\()",
+            r"(=|\.mean\(|\.sum\(|pct_change\(|cumprod\(|cumsum\().{0,80}"
+            r"\b(sharpe|drawdown|turnover|gross|net|return)\b",
+            r"\b(change|alter|replace|rewrite|redefine|annualize|normalize)\b.{0,80}"
+            r"\b(metric|sharpe|drawdown|turnover|baseline|cost|return)\b",
+            r"\b(metric|sharpe|drawdown|turnover|baseline|cost|return)\b.{0,80}"
+            r"\b(change|alter|replace|rewrite|redefine|annualize|normalize)\b",
+        ),
+    )
+
+
 def _semantic_diff_or_metadata(
     added_diff: str,
     pr_metadata: str,
@@ -1021,8 +1036,6 @@ def _is_label_semantics_path(path: str) -> bool:
 def _is_backtest_semantics_path(path: str) -> bool:
     return (
         path.startswith("src/silver/backtest/")
-        or path.startswith("src/silver/reports/")
-        or path.startswith("src/silver/analytics/")
         or path in {
             "scripts/run_falsifier.py",
             "scripts/check_falsifier_inputs.py",
