@@ -125,12 +125,17 @@ def test_traceability_snapshot_resolves_backtest_run_to_model_run_metadata() -> 
     assert snapshot.backtest_metrics == {"sharpe_net": 0.71, "turnover": 0.18}
     assert snapshot.backtest_metrics_by_regime["pre_2019"]["sharpe_net"] == 0.52
     assert snapshot.backtest_baseline_metrics["equal_weight"]["sharpe_net"] == 0.08
-    assert snapshot.backtest_label_scramble_metrics == {"scrambled_sharpe_net": 0.01}
+    assert snapshot.backtest_label_scramble_metrics == {
+        "scrambled_sharpe_net": 0.01,
+    }
     assert snapshot.backtest_label_scramble_pass is True
 
     sql, params = connection.executed[-1]
     assert sql.startswith("SELECT\n    mr.id AS model_run_id")
     assert "JOIN silver.model_runs mr ON mr.id = br.model_run_id" in sql
+    assert "br.metrics_by_regime AS backtest_metrics_by_regime" in sql
+    assert "br.label_scramble_metrics AS backtest_label_scramble_metrics" in sql
+    assert "br.label_scramble_pass AS backtest_label_scramble_pass" in sql
     assert params == {"backtest_run_id": backtest.id}
 
 
@@ -557,11 +562,11 @@ class FakeMetadataCursor:
                 "backtest_metrics": backtest["metrics"],
                 "backtest_metrics_by_regime": backtest["metrics_by_regime"],
                 "backtest_baseline_metrics": backtest["baseline_metrics"],
-                "backtest_parameters": backtest["parameters"],
                 "backtest_label_scramble_metrics": backtest[
                     "label_scramble_metrics"
                 ],
                 "backtest_label_scramble_pass": backtest["label_scramble_pass"],
+                "backtest_parameters": backtest["parameters"],
                 "backtest_multiple_comparisons_correction": backtest[
                     "multiple_comparisons_correction"
                 ],

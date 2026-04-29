@@ -532,6 +532,25 @@ def test_dirty_pr_moves_to_rework() -> None:
     assert "merge conflicts" in decision.reason
 
 
+def test_dirty_pr_moves_to_rework_even_when_required_check_is_missing() -> None:
+    issue = _issue("ARR-51")
+    pr = _pr(
+        56,
+        title="ARR-51 Enforce durable backtest metadata replay constraints",
+        merge_state_status="DIRTY",
+        checks=(),
+    )
+
+    decision = merge_steward.decide_issue_action(
+        issue,
+        pr,
+        ("Python 3.10 checks",),
+    )
+
+    assert decision.action == "move_rework"
+    assert "merge conflicts" in decision.reason
+
+
 def test_pending_required_check_waits() -> None:
     issue = _issue("ARR-30")
     pr = _pr(

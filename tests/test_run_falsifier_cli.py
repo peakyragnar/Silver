@@ -124,6 +124,7 @@ def test_report_run_creates_and_finishes_model_and_backtest_success(
     _backtest_run_id, backtest_finish = repo.backtest_finishes[0]
     assert backtest_finish.status == "succeeded"
     assert backtest_finish.metrics["mean_strategy_net_horizon_return"] is not None
+    assert backtest_finish.metrics_by_regime
     assert "equal_weight_universe" in backtest_finish.baseline_metrics
     assert backtest_finish.label_scramble_metrics["status"] == "completed"
     assert backtest_finish.label_scramble_pass is True
@@ -180,6 +181,55 @@ def test_report_traceability_validation_fails_clearly_on_metadata_mismatch(
         cli.FalsifierCliError,
         match="model_runs.code_git_sha",
     ):
+        cli.run_report_with_metadata(
+            args,
+            client=object(),
+            metadata_repository=repo,
+            calendar=calendar,
+        )
+
+    assert repo.traceability_loads == [2]
+    assert not (tmp_path / "report.md").exists()
+
+
+@pytest.mark.parametrize(
+    ("traceability_overrides", "expected_field"),
+    (
+        ({"backtest_metrics_by_regime": {}}, "backtest_runs.metrics_by_regime"),
+        (
+            {"backtest_label_scramble_metrics": {"status": "not_run"}},
+            "backtest_runs.label_scramble_metrics",
+        ),
+        ({"backtest_label_scramble_pass": False}, "backtest_runs.label_scramble_pass"),
+    ),
+)
+def test_report_traceability_validation_checks_complete_backtest_claim_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    traceability_overrides: dict[str, Any],
+    expected_field: str,
+) -> None:
+    calendar = _calendar()
+    repo = FakeMetadataRepository(traceability_overrides=traceability_overrides)
+    args = cli.parse_args(
+        [
+            "--database-url",
+            "postgresql://user:pass@localhost/silver",
+            "--output-path",
+            str(tmp_path / "report.md"),
+        ]
+    )
+    monkeypatch.setattr(cli, "_git_sha", lambda: "abcdef0")
+    monkeypatch.setattr(cli, "run_label_scramble", _fake_label_scramble)
+    monkeypatch.setattr(
+        cli,
+        "load_persisted_inputs",
+        lambda *_args, **_kwargs: _persisted_inputs(
+            rows=_momentum_rows(calendar, session_count=420),
+        ),
+    )
+
+    with pytest.raises(cli.FalsifierCliError, match=expected_field):
         cli.run_report_with_metadata(
             args,
             client=object(),
@@ -444,6 +494,10 @@ class FakeMetadataRepository:
             "backtest_metrics": dict(backtest_finish.metrics),
             "backtest_metrics_by_regime": dict(backtest_finish.metrics_by_regime),
             "backtest_baseline_metrics": dict(backtest_finish.baseline_metrics),
+            "backtest_label_scramble_metrics": dict(
+                backtest_finish.label_scramble_metrics,
+            ),
+            "backtest_label_scramble_pass": backtest_finish.label_scramble_pass,
             "backtest_parameters": dict(backtest_create.parameters),
             "backtest_label_scramble_metrics": dict(
                 backtest_finish.label_scramble_metrics,
