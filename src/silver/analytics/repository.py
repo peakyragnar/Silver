@@ -394,15 +394,33 @@ def _model_run_create_params(run: ModelRunCreate) -> dict[str, Any]:
     if test_start <= training_end:
         raise BacktestMetadataError("test_start_date must be after training_end_date")
 
+    feature_snapshot_ref = _optional_metadata_label(
+        run.feature_snapshot_ref,
+        "feature_snapshot_ref",
+    )
+    cost_assumptions = _json_object(run.cost_assumptions, "cost_assumptions")
+    if not cost_assumptions:
+        raise BacktestMetadataError("cost_assumptions must be non-empty")
+    available_at_policy_versions = _json_object(
+        run.available_at_policy_versions,
+        "available_at_policy_versions",
+    )
+    if not available_at_policy_versions:
+        raise BacktestMetadataError(
+            "available_at_policy_versions must be non-empty"
+        )
+    input_fingerprints = _json_object(run.input_fingerprints, "input_fingerprints")
+    if feature_snapshot_ref is None and not input_fingerprints:
+        raise BacktestMetadataError(
+            "model runs must provide feature_snapshot_ref or input_fingerprints"
+        )
+
     return {
         "model_run_key": _metadata_label(run.model_run_key, "model_run_key"),
         "name": _metadata_label(run.name, "name"),
         "code_git_sha": _code_git_sha(run.code_git_sha),
         "feature_set_hash": _feature_set_hash(run.feature_set_hash),
-        "feature_snapshot_ref": _optional_metadata_label(
-            run.feature_snapshot_ref,
-            "feature_snapshot_ref",
-        ),
+        "feature_snapshot_ref": feature_snapshot_ref,
         "training_start_date": training_start,
         "training_end_date": training_end,
         "test_start_date": test_start,
@@ -411,16 +429,16 @@ def _model_run_create_params(run: ModelRunCreate) -> dict[str, Any]:
         "target_kind": _target_kind(run.target_kind),
         "random_seed": _non_negative_int(run.random_seed, "random_seed"),
         "cost_assumptions": _json_dumps_object(
-            run.cost_assumptions,
+            cost_assumptions,
             "cost_assumptions",
         ),
         "parameters": _json_dumps_object(run.parameters, "parameters"),
         "available_at_policy_versions": _json_dumps_object(
-            run.available_at_policy_versions,
+            available_at_policy_versions,
             "available_at_policy_versions",
         ),
         "input_fingerprints": _json_dumps_object(
-            run.input_fingerprints,
+            input_fingerprints,
             "input_fingerprints",
         ),
     }
@@ -446,6 +464,9 @@ def _model_run_finish_params(
 def _backtest_run_create_params(run: BacktestRunCreate) -> dict[str, Any]:
     if not isinstance(run, BacktestRunCreate):
         raise BacktestMetadataError("run must be a BacktestRunCreate")
+    cost_assumptions = _json_object(run.cost_assumptions, "cost_assumptions")
+    if not cost_assumptions:
+        raise BacktestMetadataError("cost_assumptions must be non-empty")
     return {
         "backtest_run_key": _metadata_label(
             run.backtest_run_key,
@@ -457,7 +478,7 @@ def _backtest_run_create_params(run: BacktestRunCreate) -> dict[str, Any]:
         "horizon_days": _horizon_days(run.horizon_days),
         "target_kind": _target_kind(run.target_kind),
         "cost_assumptions": _json_dumps_object(
-            run.cost_assumptions,
+            cost_assumptions,
             "cost_assumptions",
         ),
         "parameters": _json_dumps_object(run.parameters, "parameters"),
@@ -476,15 +497,28 @@ def _backtest_run_finish_params(
     normalized_status = _terminal_status(finish.status)
     cost_assumptions = _json_object(finish.cost_assumptions, "cost_assumptions")
     metrics = _json_object(finish.metrics, "metrics")
+    metrics_by_regime = _json_object(finish.metrics_by_regime, "metrics_by_regime")
     baseline_metrics = _json_object(finish.baseline_metrics, "baseline_metrics")
+    label_scramble_metrics = _json_object(
+        finish.label_scramble_metrics,
+        "label_scramble_metrics",
+    )
     if normalized_status == "succeeded":
         if not metrics:
             raise BacktestMetadataError(
                 "metrics must be non-empty for succeeded backtest runs"
             )
+        if not metrics_by_regime:
+            raise BacktestMetadataError(
+                "metrics_by_regime must be non-empty for succeeded backtest runs"
+            )
         if not baseline_metrics:
             raise BacktestMetadataError(
                 "baseline_metrics must be non-empty for succeeded backtest runs"
+            )
+        if not label_scramble_metrics:
+            raise BacktestMetadataError(
+                "label_scramble_metrics must be non-empty for succeeded backtest runs"
             )
         if not cost_assumptions:
             raise BacktestMetadataError(
@@ -504,7 +538,7 @@ def _backtest_run_finish_params(
         ),
         "metrics": _json_dumps_object(metrics, "metrics"),
         "metrics_by_regime": _json_dumps_object(
-            finish.metrics_by_regime,
+            metrics_by_regime,
             "metrics_by_regime",
         ),
         "baseline_metrics": _json_dumps_object(
@@ -512,7 +546,7 @@ def _backtest_run_finish_params(
             "baseline_metrics",
         ),
         "label_scramble_metrics": _json_dumps_object(
-            finish.label_scramble_metrics,
+            label_scramble_metrics,
             "label_scramble_metrics",
         ),
         "label_scramble_pass": finish.label_scramble_pass,
@@ -1046,6 +1080,22 @@ def _metadata_row_date(row: object, key: str, index: int, name: str) -> date:
     value = _row_value(row, key, index)
     if isinstance(value, datetime) or not isinstance(value, date):
         raise BacktestMetadataError(f"{name} returned by database must be a date")
+    return value
+
+
+def _metadata_row_optional_bool(
+    row: object,
+    key: str,
+    index: int,
+    name: str,
+) -> bool | None:
+    value = _row_value(row, key, index)
+    if value is None:
+        return None
+    if not isinstance(value, bool):
+        raise BacktestMetadataError(
+            f"{name} returned by database must be a boolean or null"
+        )
     return value
 
 

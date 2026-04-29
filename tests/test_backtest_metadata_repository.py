@@ -172,12 +172,28 @@ def test_invalid_inputs_are_rejected_before_sql_execution() -> None:
         lambda repo: repo.create_model_run(
             replace(_model_run_create(), parameters=["not", "object"]),
         ),
+        lambda repo: repo.create_model_run(
+            replace(_model_run_create(), cost_assumptions={}),
+        ),
+        lambda repo: repo.create_model_run(
+            replace(_model_run_create(), available_at_policy_versions={}),
+        ),
+        lambda repo: repo.create_model_run(
+            replace(
+                _model_run_create(),
+                feature_snapshot_ref=None,
+                input_fingerprints={},
+            ),
+        ),
         lambda repo: repo.finish_model_run(
             1,
             ModelRunFinish(status="running"),
         ),
         lambda repo: repo.create_backtest_run(
             replace(_backtest_run_create(), model_run_id=0),
+        ),
+        lambda repo: repo.create_backtest_run(
+            replace(_backtest_run_create(), cost_assumptions={}),
         ),
         lambda repo: repo.finish_backtest_run(
             1,
@@ -186,6 +202,30 @@ def test_invalid_inputs_are_rejected_before_sql_execution() -> None:
                 cost_assumptions={"half_spread_bps": 5},
                 metrics={"sharpe_net": 0.5},
                 baseline_metrics={},
+                label_scramble_pass=True,
+            ),
+        ),
+        lambda repo: repo.finish_backtest_run(
+            1,
+            BacktestRunFinish(
+                status="succeeded",
+                cost_assumptions={"half_spread_bps": 5},
+                metrics={"sharpe_net": 0.5},
+                metrics_by_regime={},
+                baseline_metrics={"equal_weight": {"sharpe_net": 0.1}},
+                label_scramble_metrics={"scrambled_sharpe_net": 0.01},
+                label_scramble_pass=True,
+            ),
+        ),
+        lambda repo: repo.finish_backtest_run(
+            1,
+            BacktestRunFinish(
+                status="succeeded",
+                cost_assumptions={"half_spread_bps": 5},
+                metrics={"sharpe_net": 0.5},
+                metrics_by_regime={"pre_2019": {"sharpe_net": 0.2}},
+                baseline_metrics={"equal_weight": {"sharpe_net": 0.1}},
+                label_scramble_metrics={},
                 label_scramble_pass=True,
             ),
         ),

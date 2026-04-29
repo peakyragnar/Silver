@@ -174,6 +174,9 @@ PHASE1_ANALYTICS_REQUIRED_SNIPPETS = (
     "feature_definitions_immutable_when_referenced",
 )
 PHASE2_BACKTEST_METADATA_MIGRATION = "004_backtest_metadata.sql"
+PHASE2_BACKTEST_METADATA_REPLAY_MIGRATION = (
+    "005_backtest_metadata_replay_constraints.sql"
+)
 PHASE2_BACKTEST_METADATA_TABLES = (
     "model_runs",
     "backtest_runs",
@@ -237,6 +240,37 @@ PHASE2_BACKTEST_METADATA_REQUIRED_SNIPPETS = (
     "check (jsonb_typeof(metrics) = 'object')",
     "check (finished_at is null or finished_at >= started_at)",
     "check ((status = 'running') = (finished_at is null))",
+)
+PHASE2_BACKTEST_METADATA_REPLAY_REQUIRED_SNIPPETS = (
+    (
+        "alter table silver.model_runs add constraint "
+        "model_runs_cost_assumptions_nonempty check "
+        "(cost_assumptions <> '{}'::jsonb) not valid"
+    ),
+    (
+        "alter table silver.model_runs add constraint "
+        "model_runs_policy_versions_nonempty check "
+        "(available_at_policy_versions <> '{}'::jsonb) not valid"
+    ),
+    (
+        "alter table silver.model_runs add constraint "
+        "model_runs_replay_inputs_present check ( "
+        "feature_snapshot_ref is not null or input_fingerprints <> '{}'::jsonb "
+        ") not valid"
+    ),
+    (
+        "alter table silver.backtest_runs add constraint "
+        "backtest_runs_cost_assumptions_nonempty check "
+        "(cost_assumptions <> '{}'::jsonb) not valid"
+    ),
+    (
+        "alter table silver.backtest_runs add constraint "
+        "backtest_runs_succeeded_claim_payloads_nonempty check "
+        "( status <> 'succeeded' or ( cost_assumptions <> '{}'::jsonb "
+        "and metrics <> '{}'::jsonb and metrics_by_regime <> '{}'::jsonb "
+        "and baseline_metrics <> '{}'::jsonb and label_scramble_metrics <> "
+        "'{}'::jsonb ) ) not valid"
+    ),
 )
 
 
@@ -330,6 +364,8 @@ def validate_static_schema(migrations: Sequence[Migration]) -> None:
         validate_phase1_analytics_schema(migrations[2])
     if len(migrations) >= 4:
         validate_phase2_backtest_metadata_schema(migrations[3])
+    if len(migrations) >= 5:
+        validate_phase2_backtest_metadata_replay_schema(migrations[4])
 
 
 def validate_phase1_analytics_schema(migration: Migration) -> None:
@@ -388,6 +424,22 @@ def validate_phase2_backtest_metadata_schema(migration: Migration) -> None:
             raise MigrationError(
                 f"{PHASE2_BACKTEST_METADATA_MIGRATION} is missing required SQL: "
                 f"{snippet}"
+            )
+
+
+def validate_phase2_backtest_metadata_replay_schema(migration: Migration) -> None:
+    if migration.path.name != PHASE2_BACKTEST_METADATA_REPLAY_MIGRATION:
+        raise MigrationError(
+            "fifth migration must be "
+            f"db/migrations/{PHASE2_BACKTEST_METADATA_REPLAY_MIGRATION}"
+        )
+
+    normalized_sql = _normalize_sql(migration.sql)
+    for snippet in PHASE2_BACKTEST_METADATA_REPLAY_REQUIRED_SNIPPETS:
+        if snippet not in normalized_sql:
+            raise MigrationError(
+                f"{PHASE2_BACKTEST_METADATA_REPLAY_MIGRATION} is missing "
+                f"required SQL: {snippet}"
             )
 
 

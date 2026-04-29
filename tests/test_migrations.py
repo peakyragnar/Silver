@@ -116,7 +116,7 @@ def test_backtest_metadata_migration_static_schema_expectations() -> None:
     sql = " ".join(phase2.sql.lower().split())
 
     assert phase2.path.name == "004_backtest_metadata.sql"
-    assert len(migrations) == 4
+    assert len(migrations) >= 4
     for table in apply_migrations.PHASE2_BACKTEST_METADATA_TABLES:
         assert f"create table silver.{table}" in sql
 
@@ -178,3 +178,19 @@ def test_backtest_metadata_migration_enforces_reproducibility_constraints() -> N
     assert "check (status in ('running', 'succeeded', 'failed', 'insufficient_data'))" in (
         sql
     )
+
+
+def test_backtest_metadata_replay_constraints_migration_static_expectations() -> None:
+    migrations = apply_migrations.check_migrations(ROOT / "db" / "migrations")
+    replay = migrations[4]
+    sql = apply_migrations._normalize_sql(replay.sql)
+
+    assert replay.path.name == "005_backtest_metadata_replay_constraints.sql"
+    assert len(migrations) == 5
+    for snippet in apply_migrations.PHASE2_BACKTEST_METADATA_REPLAY_REQUIRED_SNIPPETS:
+        assert snippet in sql
+
+    assert "model_runs_replay_inputs_present" in sql
+    assert "model_runs_policy_versions_nonempty" in sql
+    assert "backtest_runs_succeeded_claim_payloads_nonempty" in sql
+    assert sql.count("not valid") == 5
