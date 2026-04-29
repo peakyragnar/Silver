@@ -97,3 +97,12 @@ baseline metrics, headline metrics, available-at policy versions, and joined
 input fingerprint against stored metadata. The replay path is covered by
 `test_traceability_snapshot_resolves_backtest_run_to_model_run_metadata` and
 `test_report_traceability_validation_fails_clearly_on_metadata_mismatch`.
+
+Reproducibility proof for a reported backtest must include the reported
+`backtest_run_key` or `backtest_run_id`, the joined `model_run_id`, and evidence
+that the joined registry rows match the report's frozen code SHA, feature-set
+hash, feature snapshot or input fingerprint, training/test windows, random seed,
+cost assumptions, universe, horizon, target kind, baseline metrics, headline
+metrics, regime metrics, label-scramble result, and available-at policy
+versions. `insufficient_data` rows may be validated for deterministic handling,
+but they are no-claim evidence and do not satisfy accepted-backtest proof.
