@@ -162,6 +162,30 @@ Admit local Backlog tickets into the ledger's fast runnable queue:
 python scripts/work_ledger.py admit --max-active 5 --ready-buffer 5
 ```
 
+Preview the Linear mirror:
+
+```text
+python scripts/linear_mirror.py
+```
+
+Apply the mirror after preview:
+
+```text
+python scripts/linear_mirror.py --apply
+```
+
+Mirror mapping:
+
+| Ledger | Linear bridge |
+|---|---|
+| `Backlog` | `Backlog` |
+| `Ready` | `Todo` |
+| `Claimed` / `In Progress` | `In Progress` |
+| `Rework` | `Rework` |
+| `Merging` | `Merging` |
+| `Safety Review` | `Safety Review` |
+| `Done` | `Done` |
+
 Move a ticket manually during the MVP:
 
 ```text

@@ -102,6 +102,19 @@ python scripts/work_ledger.py admit --max-active 5 --ready-buffer 5
 python scripts/work_ledger.py list-runnable
 ```
 
+Preview the Linear mirror actions that would make local ledger state visible to
+Symphony:
+
+```bash
+python scripts/linear_mirror.py
+```
+
+Apply those visible-board changes only when the preview is correct:
+
+```bash
+python scripts/linear_mirror.py --apply
+```
+
 By default the ledger lives at:
 
 ```bash
@@ -113,7 +126,9 @@ isolated workspace. The ledger is local runtime state and must not be committed.
 
 For now, Symphony still starts workers from the Linear bridge. The ledger is the
 next control-plane layer: stewards should move to reading the ledger first, then
-mirror visible state to Linear only on changes.
+mirror visible state to Linear only on changes. The mirror maps local `Ready`
+tickets to Linear `Todo`, so Symphony can keep working while the local ledger
+becomes the source of truth.
 
 ## Run
 
