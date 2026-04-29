@@ -23,9 +23,17 @@ if str(SRC) not in sys.path:
 
 from silver.analytics import (  # noqa: E402
     BacktestMetadataRepository,
+    BacktestRunCreate,
+    BacktestRunFinish,
+    BacktestRunRecord,
     ModelRunCreate,
     ModelRunFinish,
     ModelRunRecord,
+)
+from silver.backtest.label_scramble import (  # noqa: E402
+    LabelScrambleInputError,
+    LabelScrambleSample,
+    run_label_scramble,
 )
 from silver.backtest.momentum_falsifier import (  # noqa: E402
     DEFAULT_MIN_TRAIN_SESSIONS,
@@ -33,9 +41,12 @@ from silver.backtest.momentum_falsifier import (  # noqa: E402
     DEFAULT_STEP_SESSIONS,
     DEFAULT_TEST_SESSIONS,
     MomentumBacktestRow,
+    MomentumDateResult,
+    MomentumFalsifierResult,
     MomentumFalsifierInputError,
     run_momentum_falsifier,
 )
+from silver.backtest.regimes import summarize_by_regime  # noqa: E402
 from silver.backtest.walk_forward import (  # noqa: E402
     WalkForwardConfig,
     WalkForwardSplit,
@@ -74,6 +85,10 @@ TARGET_COMMAND_TEMPLATE = (
     "python scripts/run_falsifier.py --strategy {strategy} --horizon {horizon} "
     "--universe {universe}"
 )
+DEFAULT_LABEL_SCRAMBLE_SEED = 44
+DEFAULT_LABEL_SCRAMBLE_TRIAL_COUNT = 100
+LABEL_SCRAMBLE_ALPHA = 0.05
+MULTIPLE_COMPARISONS_CORRECTION = "none"
 
 
 class FalsifierCliError(RuntimeError):
@@ -109,6 +124,7 @@ class ModelRunWindow:
 @dataclass(frozen=True, slots=True)
 class FalsifierReportRun:
     model_run: ModelRunRecord
+    backtest_run: BacktestRunRecord
     status: str
 
 
@@ -265,7 +281,8 @@ def run_report(args: argparse.Namespace) -> None:
         _close(connection)
     print(
         f"OK: wrote {_display_path(args.output_path)} with status "
-        f"{report_run.status}; model_run_id={report_run.model_run.id}"
+        f"{report_run.status}; model_run_id={report_run.model_run.id}; "
+        f"backtest_run_id={report_run.backtest_run.id}"
     )
 
 
@@ -296,6 +313,13 @@ def run_report_with_metadata(
             input_fingerprint=input_fingerprint,
             data_coverage=data_coverage,
             calendar=calendar,
+        )
+    )
+    backtest_run = metadata_repository.create_backtest_run(
+        _backtest_run_create(
+            args,
+            model_run=model_run,
+            persisted_inputs=persisted_inputs,
         )
     )
 
@@ -329,35 +353,42 @@ def run_report_with_metadata(
                 available_at_policy_versions=(
                     persisted_inputs.available_at_policy_versions
                 ),
-                run_identity=_load_run_identity(
-                    client,
-                    horizon=args.horizon,
-                    universe=args.universe,
-                    feature_set_hash=feature_set_hash,
-                    status=result.status,
+                run_identity=FalsifierRunIdentity(
+                    model_run_id=model_run.id,
+                    model_run_key=model_run.model_run_key,
+                    backtest_run_id=backtest_run.id,
+                    backtest_run_key=backtest_run.backtest_run_key,
                 ),
-                random_seed=FALSIFIER_RANDOM_SEED,
+                random_seed=DEFAULT_LABEL_SCRAMBLE_SEED,
             ),
         )
         write_report(args.output_path, render_week_1_momentum_report(report))
     except Exception as exc:
-        metadata_repository.finish_model_run(
-            model_run.id,
-            ModelRunFinish(
-                status="failed",
-                metrics={
-                    "error_message": str(exc),
-                    "error_type": type(exc).__name__,
-                },
-            ),
+        _finish_failed_metadata(
+            metadata_repository,
+            model_run=model_run,
+            backtest_run=backtest_run,
+            error=exc,
         )
         raise
 
-    finished = metadata_repository.finish_model_run(
+    finished_model = metadata_repository.finish_model_run(
         model_run.id,
         ModelRunFinish(status=result.status, metrics=_model_run_metrics(result)),
     )
-    return FalsifierReportRun(model_run=finished, status=result.status)
+    finished_backtest = metadata_repository.finish_backtest_run(
+        backtest_run.id,
+        _backtest_run_finish(
+            result=result,
+            rows=persisted_inputs.rows,
+            failure_message=None,
+        ),
+    )
+    return FalsifierReportRun(
+        model_run=finished_model,
+        backtest_run=finished_backtest,
+        status=result.status,
+    )
 
 
 def load_persisted_inputs(
@@ -384,6 +415,12 @@ def load_persisted_inputs(
     if missing_message is not None:
         raise FalsifierCliError(missing_message)
 
+    target_kind = _load_target_kind(
+        client,
+        feature_definition_id=feature_definition.id,
+        horizon=horizon,
+        universe=universe,
+    )
     rows = _load_backtest_rows(
         client,
         feature_definition_id=feature_definition.id,
@@ -395,12 +432,7 @@ def load_persisted_inputs(
         feature_definition=feature_definition,
         rows=rows,
         available_at_policy_versions=_load_policy_versions(client),
-        target_kind=_load_target_kind(
-            client,
-            feature_definition_id=feature_definition.id,
-            horizon=horizon,
-            universe=universe,
-        ),
+        target_kind=target_kind,
     )
 
 
@@ -408,6 +440,292 @@ def write_report(path: Path, content: str) -> None:
     report_path = _resolve_repo_path(path)
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text(content, encoding="utf-8")
+
+
+def _backtest_run_create(
+    args: argparse.Namespace,
+    *,
+    model_run: ModelRunRecord,
+    persisted_inputs: PersistedFalsifierInputs,
+) -> BacktestRunCreate:
+    return BacktestRunCreate(
+        backtest_run_key=_backtest_run_key(args, model_run.model_run_key),
+        model_run_id=model_run.id,
+        name=f"{args.strategy} falsifier backtest",
+        universe_name=args.universe,
+        horizon_days=args.horizon,
+        target_kind=persisted_inputs.target_kind,
+        cost_assumptions=_cost_assumptions(None),
+        parameters={
+            "command": _target_command(args),
+            "feature_definition": {
+                "definition_hash": persisted_inputs.feature_definition.definition_hash,
+                "id": persisted_inputs.feature_definition.id,
+                "name": persisted_inputs.feature_definition.name,
+                "version": persisted_inputs.feature_definition.version,
+            },
+            "label_scramble_alpha": LABEL_SCRAMBLE_ALPHA,
+            "label_scramble_seed": DEFAULT_LABEL_SCRAMBLE_SEED,
+            "label_scramble_trial_count": DEFAULT_LABEL_SCRAMBLE_TRIAL_COUNT,
+            "metadata_role": "backtest_run",
+            "min_train_sessions": DEFAULT_MIN_TRAIN_SESSIONS,
+            "model_run_key": model_run.model_run_key,
+            "multiple_comparisons_correction": MULTIPLE_COMPARISONS_CORRECTION,
+            "output_path": _display_path(args.output_path),
+            "step_sessions": DEFAULT_STEP_SESSIONS,
+            "strategy": args.strategy,
+            "target_kind": persisted_inputs.target_kind,
+            "test_sessions": DEFAULT_TEST_SESSIONS,
+            "universe": args.universe,
+        },
+        multiple_comparisons_correction=MULTIPLE_COMPARISONS_CORRECTION,
+    )
+
+
+def _backtest_run_key(args: argparse.Namespace, model_run_key: str) -> str:
+    payload = {
+        "command": _target_command(args),
+        "horizon": args.horizon,
+        "model_run_key": model_run_key,
+        "strategy": args.strategy,
+        "universe": args.universe,
+        "version": 1,
+    }
+    digest = hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    return f"falsifier-backtest-{args.strategy}-h{args.horizon}-{digest[:16]}"
+
+
+def _backtest_run_finish(
+    *,
+    result: MomentumFalsifierResult | None,
+    rows: Sequence[MomentumBacktestRow],
+    failure_message: str | None,
+) -> BacktestRunFinish:
+    label_scramble_metrics, label_scramble_pass = _label_scramble_payload(
+        rows=rows,
+        result=result,
+    )
+    status = "failed" if result is None else result.status
+    return BacktestRunFinish(
+        status=status,
+        cost_assumptions=_cost_assumptions(result),
+        metrics=_metrics_payload(result=result, failure_message=failure_message),
+        metrics_by_regime=_metrics_by_regime(result),
+        baseline_metrics=_baseline_metrics(result),
+        label_scramble_metrics=label_scramble_metrics,
+        label_scramble_pass=label_scramble_pass,
+        multiple_comparisons_correction=MULTIPLE_COMPARISONS_CORRECTION,
+    )
+
+
+def _finish_failed_metadata(
+    metadata_repository: BacktestMetadataRepository,
+    *,
+    model_run: ModelRunRecord,
+    backtest_run: BacktestRunRecord,
+    error: Exception,
+) -> None:
+    metadata_repository.finish_model_run(
+        model_run.id,
+        ModelRunFinish(
+            status="failed",
+            metrics={
+                "error_message": str(error),
+                "error_type": type(error).__name__,
+            },
+        ),
+    )
+    metadata_repository.finish_backtest_run(
+        backtest_run.id,
+        _backtest_run_finish(
+            result=None,
+            rows=(),
+            failure_message=str(error),
+        ),
+    )
+
+
+def _cost_assumptions(result: MomentumFalsifierResult | None) -> dict[str, object]:
+    round_trip_cost_bps = (
+        DEFAULT_ROUND_TRIP_COST_BPS
+        if result is None
+        else result.round_trip_cost_bps
+    )
+    return {
+        "round_trip_cost_bps": round_trip_cost_bps,
+        "application": (
+            "Subtracted from strategy and equal-weight baseline returns for "
+            "each scored test date."
+        ),
+    }
+
+
+def _metrics_payload(
+    *,
+    result: MomentumFalsifierResult | None,
+    failure_message: str | None,
+) -> dict[str, object]:
+    if result is None:
+        return {
+            "status": "failed",
+            "failure_message": failure_message,
+        }
+
+    metrics = result.headline_metrics
+    return {
+        "status": result.status,
+        "failure_modes": list(result.failure_modes),
+        "scored_walk_forward_windows": metrics.split_count,
+        "scored_test_dates": metrics.scored_test_dates,
+        "eligible_observations": metrics.eligible_observations,
+        "selected_observations": metrics.selected_observations,
+        "mean_strategy_gross_horizon_return": (
+            metrics.mean_strategy_gross_return
+        ),
+        "mean_strategy_net_horizon_return": metrics.mean_strategy_net_return,
+        "strategy_net_hit_rate": metrics.strategy_net_hit_rate,
+        "strategy_net_return_stddev": metrics.strategy_net_return_stddev,
+        "strategy_net_return_to_stddev": metrics.strategy_net_return_to_stddev,
+    }
+
+
+def _baseline_metrics(
+    result: MomentumFalsifierResult | None,
+) -> dict[str, object]:
+    if result is None:
+        return {
+            "status": "not_available",
+            "reason": "falsifier execution failed before baseline metrics existed",
+        }
+
+    metrics = result.headline_metrics
+    return {
+        "equal_weight_universe": {
+            "mean_gross_horizon_return": metrics.mean_baseline_gross_return,
+            "mean_net_horizon_return": metrics.mean_baseline_net_return,
+        },
+        "strategy_vs_equal_weight_universe": {
+            "mean_net_difference": metrics.mean_net_difference_vs_baseline,
+        },
+    }
+
+
+def _metrics_by_regime(
+    result: MomentumFalsifierResult | None,
+) -> dict[str, object]:
+    if result is None:
+        return {
+            "status": "not_available",
+            "reason": "falsifier execution failed before regime metrics existed",
+        }
+
+    date_results = _date_results(result)
+    strategy_summaries = summarize_by_regime(
+        date_results,
+        date_getter=lambda row: row.asof_date,
+        value_getter=lambda row: row.strategy_net_return,
+    )
+    baseline_summaries = summarize_by_regime(
+        date_results,
+        date_getter=lambda row: row.asof_date,
+        value_getter=lambda row: row.baseline_net_return,
+    )
+    diff_summaries = summarize_by_regime(
+        date_results,
+        date_getter=lambda row: row.asof_date,
+        value_getter=lambda row: row.strategy_net_return - row.baseline_net_return,
+    )
+    baseline_by_name = {summary.regime_name: summary for summary in baseline_summaries}
+    diff_by_name = {summary.regime_name: summary for summary in diff_summaries}
+    return {
+        summary.regime_name: {
+            "start_date": summary.start_date.isoformat(),
+            "end_date": summary.end_date.isoformat(),
+            "sample_count": summary.sample_count,
+            "strategy_net_return": _regime_summary(summary),
+            "baseline_net_return": _regime_summary(
+                baseline_by_name[summary.regime_name]
+            ),
+            "net_difference_vs_baseline": _regime_summary(
+                diff_by_name[summary.regime_name]
+            ),
+        }
+        for summary in strategy_summaries
+    }
+
+
+def _regime_summary(summary: object) -> dict[str, object]:
+    return {
+        "value_count": summary.value_count,
+        "mean": summary.mean,
+        "sample_stddev": summary.sample_stddev,
+        "minimum": summary.minimum,
+        "maximum": summary.maximum,
+        "hit_rate": summary.hit_rate,
+    }
+
+
+def _label_scramble_payload(
+    *,
+    rows: Sequence[MomentumBacktestRow],
+    result: MomentumFalsifierResult | None,
+) -> tuple[dict[str, object], bool]:
+    if result is None:
+        return (
+            {
+                "status": "not_run",
+                "reason": "falsifier execution failed before label scramble",
+            },
+            False,
+        )
+    try:
+        scramble_result = run_label_scramble(
+            _label_scramble_samples(rows),
+            seed=DEFAULT_LABEL_SCRAMBLE_SEED,
+            trial_count=DEFAULT_LABEL_SCRAMBLE_TRIAL_COUNT,
+        )
+    except LabelScrambleInputError as exc:
+        return (
+            {
+                "status": "not_run",
+                "reason": str(exc),
+                "seed": DEFAULT_LABEL_SCRAMBLE_SEED,
+                "trial_count": DEFAULT_LABEL_SCRAMBLE_TRIAL_COUNT,
+            },
+            False,
+        )
+
+    payload = scramble_result.to_dict()
+    payload["status"] = "completed"
+    payload["alpha"] = LABEL_SCRAMBLE_ALPHA
+    return (
+        payload,
+        result.status == "succeeded" and scramble_result.p_value <= LABEL_SCRAMBLE_ALPHA,
+    )
+
+
+def _label_scramble_samples(
+    rows: Sequence[MomentumBacktestRow],
+) -> tuple[LabelScrambleSample, ...]:
+    return tuple(
+        LabelScrambleSample(
+            sample_id=f"{row.ticker}-{row.asof_date.isoformat()}",
+            feature_value=row.feature_value,
+            label_value=row.realized_return,
+            group_key=row.asof_date.isoformat(),
+        )
+        for row in rows
+    )
+
+
+def _date_results(result: MomentumFalsifierResult) -> tuple[MomentumDateResult, ...]:
+    return tuple(
+        date_result
+        for window in result.windows
+        for date_result in window.date_results
+    )
 
 
 def _load_universe_members(

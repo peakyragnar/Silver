@@ -54,7 +54,7 @@ def test_apply_mode_requires_database_url() -> None:
     assert "DATABASE_URL is required unless --check is used" in result.stderr
 
 
-def test_report_run_creates_and_finishes_model_run_success(
+def test_report_run_creates_and_finishes_model_and_backtest_success(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -71,7 +71,7 @@ def test_report_run_creates_and_finishes_model_run_success(
         ]
     )
     monkeypatch.setattr(cli, "_git_sha", lambda: "abcdef0")
-    monkeypatch.setattr(cli, "_load_run_identity", lambda *args, **kwargs: None)
+    monkeypatch.setattr(cli, "run_label_scramble", _fake_label_scramble)
     monkeypatch.setattr(
         cli,
         "load_persisted_inputs",
@@ -87,32 +87,53 @@ def test_report_run_creates_and_finishes_model_run_success(
 
     assert outcome.status == "succeeded"
     assert outcome.model_run.status == "succeeded"
-    assert len(repo.created) == 1
-    assert len(repo.finishes) == 1
-    created = repo.created[0]
-    assert created.name == "Momentum 12-1 falsifier"
-    assert created.code_git_sha == "abcdef0"
-    assert created.feature_set_hash == cli._feature_set_hash(feature)
-    assert created.random_seed == 0
-    assert created.target_kind == "excess_return_market"
-    assert created.training_start_date < created.training_end_date
-    assert created.test_start_date > created.training_end_date
-    assert created.test_end_date >= created.test_start_date
-    assert created.available_at_policy_versions == {"daily_price": 1}
-    assert created.input_fingerprints["row_count"] == len(rows)
-    assert "joined_feature_label_rows_sha256" in created.input_fingerprints
-    assert created.parameters["feature_definition"]["definition_hash"] == "a" * 64
-    assert created.parameters["window_source"] == "scorable_walk_forward"
-    assert created.cost_assumptions["round_trip_cost_bps"] == 20.0
+    assert outcome.backtest_run.status == "succeeded"
+    assert len(repo.model_creates) == 1
+    assert len(repo.model_finishes) == 1
+    assert len(repo.backtest_creates) == 1
+    assert len(repo.backtest_finishes) == 1
 
-    _run_id, finish = repo.finishes[0]
-    assert finish.status == "succeeded"
-    assert finish.metrics["split_count"] > 0
-    assert finish.metrics["status"] == "succeeded"
-    assert (tmp_path / "report.md").exists()
+    model_create = repo.model_creates[0]
+    assert model_create.name == "Momentum 12-1 falsifier"
+    assert model_create.code_git_sha == "abcdef0"
+    assert model_create.feature_set_hash == cli._feature_set_hash(feature)
+    assert model_create.random_seed == 0
+    assert model_create.target_kind == "excess_return_market"
+    assert model_create.training_start_date < model_create.training_end_date
+    assert model_create.test_start_date > model_create.training_end_date
+    assert model_create.test_end_date >= model_create.test_start_date
+    assert model_create.available_at_policy_versions == {"daily_price": 1}
+    assert model_create.input_fingerprints["row_count"] == len(rows)
+    assert "joined_feature_label_rows_sha256" in model_create.input_fingerprints
+    assert model_create.parameters["feature_definition"]["definition_hash"] == "a" * 64
+    assert model_create.parameters["window_source"] == "scorable_walk_forward"
+    assert model_create.cost_assumptions["round_trip_cost_bps"] == 20.0
+
+    backtest_create = repo.backtest_creates[0]
+    assert backtest_create.model_run_id == 1
+    assert backtest_create.target_kind == "excess_return_market"
+    assert backtest_create.parameters["model_run_key"] == model_create.model_run_key
+    assert backtest_create.multiple_comparisons_correction == "none"
+
+    _model_run_id, model_finish = repo.model_finishes[0]
+    assert model_finish.status == "succeeded"
+    assert model_finish.metrics["split_count"] > 0
+    assert model_finish.metrics["status"] == "succeeded"
+
+    _backtest_run_id, backtest_finish = repo.backtest_finishes[0]
+    assert backtest_finish.status == "succeeded"
+    assert backtest_finish.metrics["mean_strategy_net_horizon_return"] is not None
+    assert "equal_weight_universe" in backtest_finish.baseline_metrics
+    assert backtest_finish.label_scramble_metrics["status"] == "completed"
+    assert backtest_finish.label_scramble_pass is True
+    assert backtest_finish.multiple_comparisons_correction == "none"
+
+    report_text = (tmp_path / "report.md").read_text(encoding="utf-8")
+    assert "| model_run_id | 1 |" in report_text
+    assert "| backtest_run_id | 2 |" in report_text
 
 
-def test_report_run_finishes_model_run_as_insufficient_data(
+def test_report_run_finishes_model_and_backtest_as_insufficient_data(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -127,7 +148,7 @@ def test_report_run_finishes_model_run_as_insufficient_data(
         ]
     )
     monkeypatch.setattr(cli, "_git_sha", lambda: "abcdef0")
-    monkeypatch.setattr(cli, "_load_run_identity", lambda *args, **kwargs: None)
+    monkeypatch.setattr(cli, "run_label_scramble", _fake_label_scramble)
     monkeypatch.setattr(
         cli,
         "load_persisted_inputs",
@@ -144,13 +165,16 @@ def test_report_run_finishes_model_run_as_insufficient_data(
     )
 
     assert outcome.status == "insufficient_data"
-    assert repo.finishes[0][1].status == "insufficient_data"
-    assert repo.finishes[0][1].metrics["split_count"] == 0
-    assert repo.finishes[0][1].metrics["failure_modes"]
-    assert repo.created[0].parameters["window_source"] == "input_coverage_fallback"
+    assert repo.model_finishes[0][1].status == "insufficient_data"
+    assert repo.model_finishes[0][1].metrics["split_count"] == 0
+    assert repo.model_finishes[0][1].metrics["failure_modes"]
+    assert repo.backtest_finishes[0][1].status == "insufficient_data"
+    assert repo.backtest_finishes[0][1].metrics["status"] == "insufficient_data"
+    assert repo.backtest_finishes[0][1].label_scramble_pass is False
+    assert repo.model_creates[0].parameters["window_source"] == "input_coverage_fallback"
 
 
-def test_report_run_finishes_model_run_as_failed_on_execution_error(
+def test_report_run_finishes_model_and_backtest_as_failed_on_execution_error(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -186,11 +210,17 @@ def test_report_run_finishes_model_run_as_failed_on_execution_error(
             calendar=calendar,
         )
 
-    assert repo.finishes[0][1].status == "failed"
-    assert repo.finishes[0][1].metrics == {
+    assert repo.model_finishes[0][1].status == "failed"
+    assert repo.model_finishes[0][1].metrics == {
         "error_message": "synthetic execution failure",
         "error_type": "MomentumFalsifierInputError",
     }
+    assert repo.backtest_finishes[0][1].status == "failed"
+    assert repo.backtest_finishes[0][1].metrics == {
+        "status": "failed",
+        "failure_message": "synthetic execution failure",
+    }
+    assert repo.backtest_finishes[0][1].label_scramble_pass is False
     assert not (tmp_path / "report.md").exists()
 
 
@@ -258,13 +288,30 @@ def _momentum_rows(calendar: Any, *, session_count: int) -> tuple[Any, ...]:
     return tuple(rows)
 
 
+class FakeLabelScrambleResult:
+    p_value = 0.01
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "p_value": self.p_value,
+            "seed": cli.DEFAULT_LABEL_SCRAMBLE_SEED,
+            "trial_count": cli.DEFAULT_LABEL_SCRAMBLE_TRIAL_COUNT,
+        }
+
+
+def _fake_label_scramble(*_args: Any, **_kwargs: Any) -> FakeLabelScrambleResult:
+    return FakeLabelScrambleResult()
+
+
 class FakeMetadataRepository:
     def __init__(self) -> None:
-        self.created: list[Any] = []
-        self.finishes: list[tuple[int, Any]] = []
+        self.model_creates: list[Any] = []
+        self.model_finishes: list[tuple[int, Any]] = []
+        self.backtest_creates: list[Any] = []
+        self.backtest_finishes: list[tuple[int, Any]] = []
 
     def create_model_run(self, run: Any) -> Any:
-        self.created.append(run)
+        self.model_creates.append(run)
         return cli.ModelRunRecord(
             id=1,
             model_run_key=run.model_run_key,
@@ -272,9 +319,25 @@ class FakeMetadataRepository:
         )
 
     def finish_model_run(self, run_id: int, finish: Any) -> Any:
-        self.finishes.append((run_id, finish))
+        self.model_finishes.append((run_id, finish))
         return cli.ModelRunRecord(
             id=run_id,
-            model_run_key=self.created[0].model_run_key,
+            model_run_key=self.model_creates[0].model_run_key,
+            status=finish.status,
+        )
+
+    def create_backtest_run(self, run: Any) -> Any:
+        self.backtest_creates.append(run)
+        return cli.BacktestRunRecord(
+            id=2,
+            backtest_run_key=run.backtest_run_key,
+            status="running",
+        )
+
+    def finish_backtest_run(self, run_id: int, finish: Any) -> Any:
+        self.backtest_finishes.append((run_id, finish))
+        return cli.BacktestRunRecord(
+            id=run_id,
+            backtest_run_key=self.backtest_creates[0].backtest_run_key,
             status=finish.status,
         )
