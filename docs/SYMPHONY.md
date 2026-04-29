@@ -38,9 +38,13 @@ If the Linear project changes, edit [`../WORKFLOW.md`](../WORKFLOW.md):
 - Keep `Merging` as a non-active Linear state. It is handled by the lightweight
   merge steward script instead of a full Codex worker.
 
-## Linear State Machine
+## Linear Bridge
 
-Silver uses Linear as the Symphony control plane:
+Silver currently uses Linear as Symphony's visible control bridge. That means
+Linear states still decide which tickets Symphony starts today, but Linear is
+not the long-term runtime database for Silver automation. The target source of
+truth is a local Silver work ledger, with Linear kept only as an optional mirror
+or board.
 
 | State | Symphony active? | Meaning |
 |---|---:|---|
@@ -59,6 +63,11 @@ lightweight merge steward handles GitHub merge queue and marks the issue `Done`
 after the PR lands. Failed checks and mechanical conflicts move back to
 `Rework`; destructive, semantic, paid/live, security, or scope-drift exceptions
 move to `Safety Review`.
+
+Do not use Linear as a high-frequency polling database. Stewards should read
+Linear in bounded calls, update it only on state changes, and back off on rate
+limits. If Linear is unavailable, active GitHub PRs and the future Silver work
+ledger should remain the operational source of truth.
 
 ## Proof Packets
 
@@ -152,7 +161,7 @@ tmux new-session -d -s silver-admission-steward '
   set +a
   cd /Users/michael/Silver
   uv run python scripts/admission_steward.py --watch --promote \
-    --max-active 5 --todo-buffer 5 --poll-interval 30
+    --max-active 5 --todo-buffer 5 --poll-interval 300
 '
 ```
 
@@ -194,7 +203,7 @@ tmux new-session -d -s silver-merge-steward '
   source /Users/michael/Silver/.env
   set +a
   cd /Users/michael/Silver
-  uv run python scripts/merge_steward.py --watch --poll-interval 30
+  uv run python scripts/merge_steward.py --watch --poll-interval 300
 '
 ```
 

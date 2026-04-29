@@ -34,6 +34,9 @@ NON_ADMISSION_STATES = frozenset(
 TERMINAL_STATES = frozenset(("Done", "Canceled", "Duplicate"))
 DEFAULT_MAX_ACTIVE = 5
 DEFAULT_TODO_BUFFER = 5
+DEFAULT_WATCH_POLL_INTERVAL = 300
+MIN_WATCH_POLL_INTERVAL = 120
+DEFAULT_RATE_LIMIT_BACKOFF_SECONDS = 3600
 HARD_EXACT_PATHS = frozenset(
     (
         "WORKFLOW.md",
@@ -48,6 +51,14 @@ AdmissionAction = Literal["promote", "wait", "skip"]
 
 class AdmissionStewardError(RuntimeError):
     """Raised when the admission steward cannot safely continue."""
+
+
+class LinearRateLimitError(AdmissionStewardError):
+    """Raised when Linear asks the steward to stop polling for a while."""
+
+    def __init__(self, message: str, retry_after_seconds: int) -> None:
+        super().__init__(message)
+        self.retry_after_seconds = retry_after_seconds
 
 
 @dataclass(frozen=True, slots=True)
@@ -92,6 +103,7 @@ class AdmissionDecision:
 class LinearClient:
     def __init__(self, api_key: str) -> None:
         self.api_key = api_key
+        self._team_state_cache: dict[str, Mapping[str, LinearState]] = {}
 
     def graphql(
         self,
@@ -113,14 +125,29 @@ class LinearClient:
                 payload = json.load(response)
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode(errors="replace")
+            if exc.code == 429:
+                retry_after = parse_retry_after_seconds(
+                    exc.headers.get("Retry-After")
+                )
+                raise LinearRateLimitError(
+                    f"Linear rate limit reached: {detail}",
+                    retry_after,
+                ) from exc
             raise AdmissionStewardError(
                 f"Linear request failed with HTTP {exc.code}: {detail}"
             ) from exc
         except urllib.error.URLError as exc:
             raise AdmissionStewardError(f"Linear request failed: {exc}") from exc
 
-        if payload.get("errors"):
-            raise AdmissionStewardError(f"Linear returned errors: {payload['errors']}")
+        errors = payload.get("errors")
+        if errors:
+            retry_after = linear_errors_retry_after_seconds(errors)
+            if retry_after is not None:
+                raise LinearRateLimitError(
+                    f"Linear rate limit reached: {errors}",
+                    retry_after,
+                )
+            raise AdmissionStewardError(f"Linear returned errors: {errors}")
         return payload["data"]
 
     def project_issues(self, project_id_or_slug: str) -> tuple[LinearIssue, ...]:
@@ -136,6 +163,15 @@ class LinearClient:
                 description
                 state { name }
                 team { id }
+                relations {
+                  nodes {
+                    type
+                    relatedIssue {
+                      identifier
+                      state { name }
+                    }
+                  }
+                }
               }
             }
           }
@@ -167,7 +203,7 @@ class LinearClient:
                     description=str(node.get("description") or ""),
                     state=node["state"]["name"],
                     team_states=states_by_team[node["team"]["id"]],
-                    relations=self.issue_relations(node["id"]),
+                    relations=parse_issue_relations(node),
                 )
             )
         return tuple(issues)
@@ -203,6 +239,10 @@ class LinearClient:
         )
 
     def team_states(self, team_id: str) -> Mapping[str, LinearState]:
+        cached = self._team_state_cache.get(team_id)
+        if cached is not None:
+            return cached
+
         query = """
         query($team: String!) {
           team(id: $team) {
@@ -216,10 +256,12 @@ class LinearClient:
         team = data.get("team")
         if team is None:
             raise AdmissionStewardError(f"Linear team not found: {team_id!r}")
-        return {
+        states = {
             node["name"]: LinearState(id=node["id"], name=node["name"])
             for node in team["states"]["nodes"]
         }
+        self._team_state_cache[team_id] = states
+        return states
 
     def create_comment(self, issue_id: str, body: str) -> None:
         mutation = """
@@ -353,7 +395,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--poll-interval",
         type=int,
-        default=30,
+        default=DEFAULT_WATCH_POLL_INTERVAL,
         help="seconds between --watch polls",
     )
     parser.add_argument(
@@ -395,9 +437,29 @@ def watch(
     linear: LinearClient,
     github: GitHubClient,
 ) -> None:
+    poll_interval = effective_watch_poll_interval(args.poll_interval)
+    if poll_interval != args.poll_interval:
+        print(
+            (
+                "Admission steward poll interval raised from "
+                f"{args.poll_interval}s to {poll_interval}s to protect "
+                "the Linear API limit."
+            ),
+            file=sys.stderr,
+        )
+
     while True:
-        run_once(args=args, linear=linear, github=github)
-        time.sleep(args.poll_interval)
+        try:
+            run_once(args=args, linear=linear, github=github)
+        except LinearRateLimitError as exc:
+            sleep_seconds = max(exc.retry_after_seconds, poll_interval)
+            print(
+                f"Linear rate limited; sleeping {sleep_seconds}s before retry.",
+                file=sys.stderr,
+            )
+            time.sleep(sleep_seconds)
+            continue
+        time.sleep(poll_interval)
 
 
 def run_once(
@@ -599,6 +661,37 @@ def unfinished_blockers(
     return tuple(sorted(set(blockers), key=_identifier_sort_key))
 
 
+def parse_issue_relations(node: Mapping[str, Any]) -> tuple[IssueRelation, ...]:
+    relations = node.get("relations")
+    if not isinstance(relations, Mapping):
+        return ()
+    nodes = relations.get("nodes")
+    if not isinstance(nodes, Sequence):
+        return ()
+    parsed: list[IssueRelation] = []
+    for relation in nodes:
+        if not isinstance(relation, Mapping):
+            continue
+        related_issue = relation.get("relatedIssue")
+        if not isinstance(related_issue, Mapping):
+            continue
+        state = related_issue.get("state")
+        if not isinstance(state, Mapping):
+            continue
+        parsed.append(
+            IssueRelation(
+                type=str(relation.get("type") or ""),
+                related_identifier=str(related_issue.get("identifier") or ""),
+                related_state=str(state.get("name") or ""),
+            )
+        )
+    return tuple(
+        relation
+        for relation in parsed
+        if relation.type and relation.related_identifier and relation.related_state
+    )
+
+
 def choose_open_pr_for_issue(
     issue: LinearIssue,
     pull_requests: Sequence[PullRequest],
@@ -714,6 +807,46 @@ def validate_capacity_args(max_active: int, todo_buffer: int) -> None:
         raise AdmissionStewardError("max_active must be a positive integer")
     if isinstance(todo_buffer, bool) or todo_buffer < 1:
         raise AdmissionStewardError("todo_buffer must be a positive integer")
+
+
+def effective_watch_poll_interval(poll_interval: int) -> int:
+    if isinstance(poll_interval, bool) or poll_interval < 1:
+        raise AdmissionStewardError("poll_interval must be a positive integer")
+    return max(poll_interval, MIN_WATCH_POLL_INTERVAL)
+
+
+def parse_retry_after_seconds(value: str | None) -> int:
+    if value is None:
+        return DEFAULT_RATE_LIMIT_BACKOFF_SECONDS
+    try:
+        parsed = int(value)
+    except ValueError:
+        return DEFAULT_RATE_LIMIT_BACKOFF_SECONDS
+    return max(parsed, MIN_WATCH_POLL_INTERVAL)
+
+
+def linear_errors_retry_after_seconds(errors: object) -> int | None:
+    if not isinstance(errors, Sequence) or isinstance(errors, str):
+        return None
+
+    for error in errors:
+        if not isinstance(error, Mapping):
+            continue
+        extensions = error.get("extensions")
+        if not isinstance(extensions, Mapping):
+            extensions = {}
+
+        code = str(extensions.get("code") or "").upper()
+        message = str(error.get("message") or "")
+        if code != "RATELIMITED" and "rate limit" not in message.lower():
+            continue
+
+        duration = extensions.get("duration")
+        if isinstance(duration, (int, float)) and duration > 0:
+            return max(int((duration + 999) // 1000), MIN_WATCH_POLL_INTERVAL)
+        return DEFAULT_RATE_LIMIT_BACKOFF_SECONDS
+
+    return None
 
 
 def read_workflow_project_slug(path: Path) -> str:

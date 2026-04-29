@@ -24,6 +24,9 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW_PATH = ROOT / "WORKFLOW.md"
 DEFAULT_REQUIRED_CHECKS = ("Python 3.10 checks",)
+DEFAULT_WATCH_POLL_INTERVAL = 300
+MIN_WATCH_POLL_INTERVAL = 120
+DEFAULT_RATE_LIMIT_BACKOFF_SECONDS = 3600
 MERGING_STATE = "Merging"
 SAFETY_REVIEW_STATE = "Safety Review"
 TERMINAL_STATE_NAMES = frozenset(("Done", "Canceled", "Duplicate"))
@@ -41,6 +44,14 @@ IssueAction = Literal[
 
 class MergeStewardError(RuntimeError):
     """Raised when the merge steward cannot safely continue."""
+
+
+class LinearRateLimitError(MergeStewardError):
+    """Raised when Linear asks the steward to stop polling for a while."""
+
+    def __init__(self, message: str, retry_after_seconds: int) -> None:
+        super().__init__(message)
+        self.retry_after_seconds = retry_after_seconds
 
 
 @dataclass(frozen=True, slots=True)
@@ -102,6 +113,7 @@ class Decision:
 class LinearClient:
     def __init__(self, api_key: str) -> None:
         self.api_key = api_key
+        self._team_state_cache: dict[str, Mapping[str, LinearState]] = {}
 
     def graphql(
         self,
@@ -123,14 +135,29 @@ class LinearClient:
                 payload = json.load(response)
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode(errors="replace")
+            if exc.code == 429:
+                retry_after = parse_retry_after_seconds(
+                    exc.headers.get("Retry-After")
+                )
+                raise LinearRateLimitError(
+                    f"Linear rate limit reached: {detail}",
+                    retry_after,
+                ) from exc
             raise MergeStewardError(
                 f"Linear request failed with HTTP {exc.code}: {detail}"
             ) from exc
         except urllib.error.URLError as exc:
             raise MergeStewardError(f"Linear request failed: {exc}") from exc
 
-        if payload.get("errors"):
-            raise MergeStewardError(f"Linear returned errors: {payload['errors']}")
+        errors = payload.get("errors")
+        if errors:
+            retry_after = linear_errors_retry_after_seconds(errors)
+            if retry_after is not None:
+                raise LinearRateLimitError(
+                    f"Linear rate limit reached: {errors}",
+                    retry_after,
+                )
+            raise MergeStewardError(f"Linear returned errors: {errors}")
         return payload["data"]
 
     def project_issues(self, project_id_or_slug: str) -> tuple[LinearIssue, ...]:
@@ -187,6 +214,10 @@ class LinearClient:
         return merging_issue_candidates(self.project_issues(project_id_or_slug))
 
     def team_states(self, team_id: str) -> Mapping[str, LinearState]:
+        cached = self._team_state_cache.get(team_id)
+        if cached is not None:
+            return cached
+
         query = """
         query($team: String!) {
           team(id: $team) {
@@ -200,10 +231,12 @@ class LinearClient:
         team = data.get("team")
         if team is None:
             raise MergeStewardError(f"Linear team not found: {team_id!r}")
-        return {
+        states = {
             node["name"]: LinearState(id=node["id"], name=node["name"])
             for node in team["states"]["nodes"]
         }
+        self._team_state_cache[team_id] = states
+        return states
 
     def create_comment(self, issue_id: str, body: str) -> None:
         mutation = """
@@ -394,7 +427,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--poll-interval",
         type=int,
-        default=30,
+        default=DEFAULT_WATCH_POLL_INTERVAL,
         help="seconds between --watch polls",
     )
     parser.add_argument(
@@ -444,14 +477,34 @@ def watch(
     github: GitHubClient,
     required_checks: Sequence[str],
 ) -> None:
-    while True:
-        run_once(
-            args=args,
-            linear=linear,
-            github=github,
-            required_checks=required_checks,
+    poll_interval = effective_watch_poll_interval(args.poll_interval)
+    if poll_interval != args.poll_interval:
+        print(
+            (
+                "Merge steward poll interval raised from "
+                f"{args.poll_interval}s to {poll_interval}s to protect "
+                "the Linear API limit."
+            ),
+            file=sys.stderr,
         )
-        time.sleep(args.poll_interval)
+
+    while True:
+        try:
+            run_once(
+                args=args,
+                linear=linear,
+                github=github,
+                required_checks=required_checks,
+            )
+        except LinearRateLimitError as exc:
+            sleep_seconds = max(exc.retry_after_seconds, poll_interval)
+            print(
+                f"Linear rate limited; sleeping {sleep_seconds}s before retry.",
+                file=sys.stderr,
+            )
+            time.sleep(sleep_seconds)
+            continue
+        time.sleep(poll_interval)
 
 
 def run_once(
@@ -1190,6 +1243,46 @@ def check_configuration(
     lines.append("Required checks: " + ", ".join(required_checks))
     lines.append("Result: local merge steward configuration is valid")
     return "\n".join(lines)
+
+
+def effective_watch_poll_interval(poll_interval: int) -> int:
+    if isinstance(poll_interval, bool) or poll_interval < 1:
+        raise MergeStewardError("poll_interval must be a positive integer")
+    return max(poll_interval, MIN_WATCH_POLL_INTERVAL)
+
+
+def parse_retry_after_seconds(value: str | None) -> int:
+    if value is None:
+        return DEFAULT_RATE_LIMIT_BACKOFF_SECONDS
+    try:
+        parsed = int(value)
+    except ValueError:
+        return DEFAULT_RATE_LIMIT_BACKOFF_SECONDS
+    return max(parsed, MIN_WATCH_POLL_INTERVAL)
+
+
+def linear_errors_retry_after_seconds(errors: object) -> int | None:
+    if not isinstance(errors, Sequence) or isinstance(errors, str):
+        return None
+
+    for error in errors:
+        if not isinstance(error, Mapping):
+            continue
+        extensions = error.get("extensions")
+        if not isinstance(extensions, Mapping):
+            extensions = {}
+
+        code = str(extensions.get("code") or "").upper()
+        message = str(error.get("message") or "")
+        if code != "RATELIMITED" and "rate limit" not in message.lower():
+            continue
+
+        duration = extensions.get("duration")
+        if isinstance(duration, (int, float)) and duration > 0:
+            return max(int((duration + 999) // 1000), MIN_WATCH_POLL_INTERVAL)
+        return DEFAULT_RATE_LIMIT_BACKOFF_SECONDS
+
+    return None
 
 
 def read_workflow_project_slug(path: Path) -> str:

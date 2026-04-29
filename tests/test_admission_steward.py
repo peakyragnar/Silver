@@ -277,6 +277,50 @@ def test_dry_run_reports_without_writes(capsys) -> None:
     assert linear.state_updates == []
 
 
+def test_project_issues_reads_relations_without_issue_relation_calls() -> None:
+    linear = _RecordingLinearClient()
+
+    issues = linear.project_issues("silver")
+
+    assert [issue.identifier for issue in issues] == ["ARR-41", "ARR-42"]
+    assert issues[0].relations == (
+        admission_steward.IssueRelation(
+            type="blocks",
+            related_identifier="ARR-42",
+            related_state="Backlog",
+        ),
+    )
+    assert sum("issue(id:" in query for query in linear.queries) == 0
+    assert sum("team(id:" in query for query in linear.queries) == 1
+
+
+def test_team_states_are_cached_between_project_reads() -> None:
+    linear = _RecordingLinearClient()
+
+    linear.project_issues("silver")
+    linear.project_issues("silver")
+
+    assert sum("project(id:" in query for query in linear.queries) == 2
+    assert sum("team(id:" in query for query in linear.queries) == 1
+
+
+def test_linear_rate_limit_error_uses_duration_ms() -> None:
+    retry_after = admission_steward.linear_errors_retry_after_seconds(
+        (
+            {
+                "message": "Only 2500 requests are allowed per 1 hour",
+                "extensions": {"code": "RATELIMITED", "duration": 3600000},
+            },
+        )
+    )
+
+    assert retry_after == 3600
+
+
+def test_fast_watch_poll_interval_is_clamped() -> None:
+    assert admission_steward.effective_watch_poll_interval(30) == 120
+
+
 def _issue(
     identifier: str,
     *,
@@ -345,3 +389,67 @@ class _FakeGitHub:
 
     def list_open_pull_requests(self, limit: int):
         return self.pull_requests
+
+
+class _RecordingLinearClient(admission_steward.LinearClient):
+    def __init__(self) -> None:
+        super().__init__("test-key")
+        self.queries: list[str] = []
+
+    def graphql(self, query, variables=None):
+        self.queries.append(query)
+        if "project(id:" in query:
+            return {
+                "project": {
+                    "issues": {
+                        "nodes": [
+                            {
+                                "id": "issue-41",
+                                "identifier": "ARR-41",
+                                "title": "First ticket",
+                                "url": "https://linear.app/arrow1/issue/ARR-41",
+                                "description": _description(
+                                    "wire-backtest-metadata-registry"
+                                ),
+                                "state": {"name": "Backlog"},
+                                "team": {"id": "team-1"},
+                                "relations": {
+                                    "nodes": [
+                                        {
+                                            "type": "blocks",
+                                            "relatedIssue": {
+                                                "identifier": "ARR-42",
+                                                "state": {"name": "Backlog"},
+                                            },
+                                        },
+                                    ],
+                                },
+                            },
+                            {
+                                "id": "issue-42",
+                                "identifier": "ARR-42",
+                                "title": "Second ticket",
+                                "url": "https://linear.app/arrow1/issue/ARR-42",
+                                "description": _description(
+                                    "wire-backtest-metadata-registry"
+                                ),
+                                "state": {"name": "Backlog"},
+                                "team": {"id": "team-1"},
+                                "relations": {"nodes": []},
+                            },
+                        ],
+                    },
+                },
+            }
+        if "team(id:" in query:
+            return {
+                "team": {
+                    "states": {
+                        "nodes": [
+                            {"id": "todo-id", "name": "Todo"},
+                            {"id": "done-id", "name": "Done"},
+                        ],
+                    },
+                },
+            }
+        raise AssertionError(f"unexpected query: {query}")

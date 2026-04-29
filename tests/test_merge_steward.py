@@ -633,6 +633,33 @@ def test_parse_github_repo_handles_https_and_ssh_remotes() -> None:
     )
 
 
+def test_project_issue_reads_reuse_team_state_cache() -> None:
+    linear = _RecordingLinearClient()
+
+    linear.project_issues("silver")
+    linear.project_issues("silver")
+
+    assert sum("project(id:" in query for query in linear.queries) == 2
+    assert sum("team(id:" in query for query in linear.queries) == 1
+
+
+def test_merge_linear_rate_limit_error_uses_duration_ms() -> None:
+    retry_after = merge_steward.linear_errors_retry_after_seconds(
+        (
+            {
+                "message": "Only 2500 requests are allowed per 1 hour",
+                "extensions": {"code": "RATELIMITED", "duration": 3600000},
+            },
+        )
+    )
+
+    assert retry_after == 3600
+
+
+def test_merge_fast_watch_poll_interval_is_clamped() -> None:
+    assert merge_steward.effective_watch_poll_interval(30) == 120
+
+
 def _issue(
     identifier: str,
     *,
@@ -737,3 +764,52 @@ class _FakeGitHub:
 
     def queue_pull_request(self, number: int) -> None:
         self.queued.append(number)
+
+
+class _RecordingLinearClient(merge_steward.LinearClient):
+    def __init__(self) -> None:
+        super().__init__("test-key")
+        self.queries: list[str] = []
+
+    def graphql(self, query, variables=None):
+        self.queries.append(query)
+        if "project(id:" in query:
+            return {
+                "project": {
+                    "issues": {
+                        "nodes": [
+                            {
+                                "id": "issue-41",
+                                "identifier": "ARR-41",
+                                "title": "First ticket",
+                                "url": "https://linear.app/arrow1/issue/ARR-41",
+                                "description": "Ticket description.",
+                                "state": {"name": "Merging"},
+                                "team": {"id": "team-1"},
+                            },
+                            {
+                                "id": "issue-42",
+                                "identifier": "ARR-42",
+                                "title": "Second ticket",
+                                "url": "https://linear.app/arrow1/issue/ARR-42",
+                                "description": "Ticket description.",
+                                "state": {"name": "Done"},
+                                "team": {"id": "team-1"},
+                            },
+                        ],
+                    },
+                },
+            }
+        if "team(id:" in query:
+            return {
+                "team": {
+                    "states": {
+                        "nodes": [
+                            {"id": "done-id", "name": "Done"},
+                            {"id": "rework-id", "name": "Rework"},
+                            {"id": "safety-id", "name": "Safety Review"},
+                        ],
+                    },
+                },
+            }
+        raise AssertionError(f"unexpected query: {query}")

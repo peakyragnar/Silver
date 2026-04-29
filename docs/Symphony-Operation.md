@@ -10,9 +10,18 @@ For local setup commands, see [`SYMPHONY.md`](SYMPHONY.md).
 
 ## Operating Model
 
-Symphony core watches Linear, creates isolated workspaces, starts Codex agents,
-and keeps active issues moving. Silver's operation layer decides what work is
-safe, useful, and ready.
+Symphony core currently watches Linear, creates isolated workspaces, starts
+Codex agents, and keeps active issues moving. Silver's operation layer decides
+what work is safe, useful, and ready.
+
+Linear is a current bridge, not the desired machine brain. The correct durable
+shape is:
+
+```text
+GitHub = code truth
+Silver work ledger = work truth
+Linear = optional human-facing mirror
+```
 
 Use this mental model:
 
@@ -20,7 +29,7 @@ Use this mental model:
 Goal
   -> Objective
       -> Work Packet
-          -> Linear Tickets
+          -> Silver Tickets
               -> PRs
                   -> Merging
                       -> Done or Rework
@@ -48,7 +57,8 @@ they become unattended automation.
 
 ## Current Lane
 
-The current Silver loop is Objective-driven automation:
+The current Silver loop is Objective-driven automation through the Linear
+bridge:
 
 1. Michael and Codex approve one or more Objectives.
 2. Planning creates scoped tickets in Linear `Backlog`.
@@ -61,17 +71,19 @@ The current Silver loop is Objective-driven automation:
 9. Safety exceptions move to `Safety Review`.
 
 This lets Michael steer direction by Objective while the system meters routine
-work into active agent capacity.
+work into active agent capacity. The bridge should be read in bounded calls and
+updated only on state changes so Linear never becomes a high-frequency runtime
+database.
 
 ## Target Lane
 
 The target Silver loop is continuous but bounded:
 
 1. Planning steward proposes the next Objectives from `SPEC.md`, active plans,
-   Linear state, GitHub PR state, and repo status.
+   Silver work-ledger state, GitHub PR state, and repo status.
 2. Michael approves one or more Objectives.
-3. Planning steward decomposes approved Objectives into Linear tickets in
-   `Backlog`.
+3. Planning steward decomposes approved Objectives into Silver tickets, mirrored
+   to Linear only when the mirror is enabled.
 4. Admission steward promotes safe, unblocked tickets to `Todo`.
 5. Symphony builds tickets up to the configured concurrency limit.
 6. Merge steward lands safe completed PRs.
@@ -80,6 +92,31 @@ The target Silver loop is continuous but bounded:
 8. Planning steward keeps the queue full from approved Objectives.
 
 The rule is: keep the system full of coherent Objectives, not just busy agents.
+
+## Linear Replacement Boundary
+
+Silver should replace Linear only where Linear is the wrong tool:
+
+| Function | Correct owner | Reason |
+|---|---|---|
+| Objective approval | Michael plus repo Objective files | Direction should be explicit and auditable. |
+| Ticket/runtime state | Silver work ledger | Agents need a cheap, local, rate-limit-free source of truth. |
+| Branches, PRs, CI, merge queue | GitHub | Code truth already lives there. |
+| Human board/search/comments | Linear, optional | Useful UI, but not required for autonomous operation. |
+
+The migration path is additive:
+
+```text
+1. Keep the current Linear bridge working.
+2. Stop high-frequency Linear polling.
+3. Add a local Silver work ledger.
+4. Make stewards read/write the ledger first.
+5. Mirror ledger state to Linear only on changes.
+6. Delete the Linear dependency only after the ledger path proves better.
+```
+
+This protects the current working lane while moving the runtime state out of
+Linear.
 
 ## Objective
 
@@ -273,9 +310,11 @@ The goal is not to remove technical detail. The goal is to make every ticket
 explain, in Michael-readable language, how a narrow change advances the larger
 Objective.
 
-## Linear State Machine
+## Linear Bridge State Machine
 
-Silver uses Linear as the control plane. These states are policy, not just UI.
+Silver currently uses these Linear states as a bridge for Symphony. These states
+are policy, not just UI. In the target design, the same states belong to the
+Silver work ledger and Linear mirrors them.
 
 | State | Symphony active? | Meaning |
 |---|---:|---|
@@ -305,7 +344,7 @@ SPEC.md
 docs/index.md
 docs/exec-plans/active/*
 docs/objectives/active/*
-Linear issues
+Silver work ledger or current Linear bridge issues
 GitHub PRs
 repo status
 recent proof packets
@@ -316,7 +355,7 @@ Outputs:
 ```text
 Recommended Objectives
 Objective packets
-Linear tickets in Backlog
+Silver tickets, mirrored to Linear Backlog while the bridge is enabled
 dependency notes
 conflict-zone notes
 migration reservation requests
@@ -400,7 +439,7 @@ python scripts/admission_steward.py --promote --max-active 5 --todo-buffer 5
 Watch mode:
 
 ```text
-python scripts/admission_steward.py --watch --promote --max-active 5 --todo-buffer 5
+python scripts/admission_steward.py --watch --promote --max-active 5 --todo-buffer 5 --poll-interval 300
 ```
 
 ## Migration Lane
@@ -526,7 +565,7 @@ The merge steward owns `Merging`.
 
 It should:
 
-1. Read Linear issues in `Merging`.
+1. Read work-ledger tickets in `Merging` or current Linear bridge issues.
 2. Find the matching GitHub PR.
 3. Confirm the PR still matches the approved ticket scope.
 4. Confirm required checks are passing.
@@ -665,8 +704,9 @@ docs/objectives/active/
 docs/objectives/completed/
 ```
 
-Each Objective file should use the Objective template above. Linear tickets can
-link back to the Objective file or parent issue.
+Each Objective file should use the Objective template above. Tickets should link
+back to the Objective file or parent issue, whether they live in the future
+Silver ledger or the current Linear bridge.
 
 Do not create a large planning database until the file-based flow is painful.
 
