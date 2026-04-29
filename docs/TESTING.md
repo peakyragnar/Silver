@@ -67,6 +67,22 @@ python scripts/run_falsifier.py --strategy momentum_12_1 --horizon 63 --universe
 The integration test should assert positive net Sharpe for the tiny seed
 universe and verify the run carries reproducibility metadata.
 
+## Backtest Metadata Registry
+
+Runtime wiring tests for `model_runs` must prove each persisted model run has a
+stable key, code SHA, feature-set hash, frozen feature snapshot or input
+fingerprint, training/test windows, horizon, target kind, random seed,
+cost-assumption set, parameters, and available-at policy versions.
+
+Runtime wiring tests for `backtest_runs` must prove each persisted backtest run
+has a stable key, a `model_run_id`, universe, horizon, target kind,
+cost-assumption set, baseline metrics, headline metrics, regime metrics,
+label-scramble result, multiple-comparisons setting when applicable, and a final
+status. `insufficient_data` is a valid terminal status but is not an accepted
+backtest claim; tests should assert it sets `finished_at`, records deterministic
+insufficiency metadata, and satisfies the shipped `label_scramble_pass`
+constraint without reporting alpha.
+
 ## Reporting
 
 Backtest reports must include gross and net metrics, baseline comparison,

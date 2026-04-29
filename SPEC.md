@@ -500,32 +500,48 @@ CREATE TABLE silver.labels (
 ```sql
 CREATE TABLE silver.model_runs (
     id                  bigserial PRIMARY KEY,
+    model_run_key       text NOT NULL UNIQUE,
     name                text NOT NULL,
     code_git_sha        text NOT NULL,
     feature_set_hash    text NOT NULL,
-    feature_snapshot_id bigint REFERENCES silver.feature_snapshots(id),
-    training_window     daterange NOT NULL,
-    test_window         daterange NOT NULL,
-    hyperparameters     jsonb NOT NULL,
+    feature_snapshot_ref text,
+    training_start_date date NOT NULL,
+    training_end_date   date NOT NULL,
+    test_start_date     date NOT NULL,
+    test_end_date       date NOT NULL,
+    horizon_days        integer NOT NULL,
+    target_kind         text NOT NULL,
     random_seed         integer NOT NULL,
-    execution_assumption_id bigint REFERENCES silver.execution_assumptions(id),
-    available_at_policy_version_set jsonb NOT NULL,  -- map of source -> version
+    cost_assumptions    jsonb NOT NULL DEFAULT '{}'::jsonb,
+    parameters          jsonb NOT NULL DEFAULT '{}'::jsonb,
+    metrics             jsonb NOT NULL DEFAULT '{}'::jsonb,
+    available_at_policy_versions jsonb NOT NULL DEFAULT '{}'::jsonb,
+    input_fingerprints  jsonb NOT NULL DEFAULT '{}'::jsonb,
     started_at          timestamptz NOT NULL DEFAULT now(),
     finished_at         timestamptz,
-    status              text NOT NULL DEFAULT 'running'  -- running, succeeded, failed
+    status              text NOT NULL DEFAULT 'running',
+    created_at          timestamptz NOT NULL DEFAULT now()
 );
 
 CREATE TABLE silver.backtest_runs (
     id                  bigserial PRIMARY KEY,
-    model_run_id        bigint NOT NULL REFERENCES silver.model_runs(id),
-    hypothesis_id       bigint REFERENCES silver.hypotheses(id),
+    backtest_run_key    text NOT NULL UNIQUE,
+    model_run_id        bigint NOT NULL REFERENCES silver.model_runs(id) ON DELETE RESTRICT,
+    name                text NOT NULL,
     universe_name       text NOT NULL,
     horizon_days        integer NOT NULL,
     target_kind         text NOT NULL,
-    metrics             jsonb NOT NULL,     -- sharpe, ic, hit_rate, max_dd, capacity, ...
-    metrics_by_regime   jsonb NOT NULL,     -- per-regime breakdown
-    label_scramble_pass boolean NOT NULL,   -- did the same model fail on scrambled labels?
+    cost_assumptions    jsonb NOT NULL DEFAULT '{}'::jsonb,
+    parameters          jsonb NOT NULL DEFAULT '{}'::jsonb,
+    metrics             jsonb NOT NULL DEFAULT '{}'::jsonb,
+    metrics_by_regime   jsonb NOT NULL DEFAULT '{}'::jsonb,
+    baseline_metrics    jsonb NOT NULL DEFAULT '{}'::jsonb,
+    label_scramble_metrics jsonb NOT NULL DEFAULT '{}'::jsonb,
+    label_scramble_pass boolean,
     multiple_comparisons_correction text,   -- 'bh', 'bonferroni', 'none'
+    started_at          timestamptz NOT NULL DEFAULT now(),
+    finished_at         timestamptz,
+    status              text NOT NULL DEFAULT 'running',
     created_at          timestamptz NOT NULL DEFAULT now()
 );
 
@@ -727,14 +743,17 @@ their labels exist.
 
 ### 10.1 Inputs
 
-- `feature_snapshot_id` — the frozen feature set
+- `feature_snapshot_ref` — frozen feature-set reference, usually a feature snapshot id once snapshots exist
 - `model_definition` — algorithm + hyperparameters (e.g., ridge, gradient-boosted trees, simple z-score ensemble)
-- `training_window` — daterange (typically 252 trading days rolling)
-- `test_window` — daterange (typically 1 trading month rolling)
+- `training_start_date` / `training_end_date` — training window dates (typically 252 trading days rolling)
+- `test_start_date` / `test_end_date` — test window dates (typically 1 trading month rolling)
 - `horizon_days` — prediction horizon
 - `target_kind` — what kind of label
 - `universe_name` — which point-in-time universe
-- `execution_assumption_id` — cost model
+- `cost_assumptions` — execution-assumption set, including cost model inputs
+- `parameters` — model and harness parameters
+- `available_at_policy_versions` — map of source/policy names to immutable versions
+- `input_fingerprints` — stable hashes for frozen input sets used by the run
 - `random_seed` — for reproducibility
 
 ### 10.2 Outputs
@@ -988,15 +1007,15 @@ Every result row carries enough metadata to rebuild it from source:
 |---|---|
 | `fundamental_facts` row | `raw_object_id`, `available_at_policy_id`, `normalization_version` |
 | `feature_values` row | `feature_definition_id` (which encodes `model_version` + `prompt_version`), `source_event_id` or `source_artifact_id`, `computed_at` |
-| `predictions` row | `model_run_id` (which encodes `code_git_sha`, `feature_set_hash`, `training_window`, `random_seed`, `execution_assumption_id`, `available_at_policy_version_set`) |
-| `backtest_runs` row | All of the above plus `universe_name` and computed metrics |
+| `predictions` row | `model_run_id` (which encodes `code_git_sha`, `feature_set_hash`, `feature_snapshot_ref`, training/test date windows, `random_seed`, `cost_assumptions`, `parameters`, `available_at_policy_versions`, and `input_fingerprints`) |
+| `backtest_runs` row | All of the model-run metadata by `model_run_id` plus `backtest_run_key`, `universe_name`, `cost_assumptions`, `metrics`, `metrics_by_regime`, `baseline_metrics`, `label_scramble_metrics`, `label_scramble_pass`, `multiple_comparisons_correction`, and final `status` |
 
 Replay procedure:
 1. Check out `code_git_sha`
-2. Apply `available_at_policy_version_set`
-3. Materialize features from `feature_snapshot_id`
-4. Train with `random_seed` over `training_window`
-5. Predict over `test_window`
+2. Apply `available_at_policy_versions`
+3. Materialize features from `feature_snapshot_ref` when present, otherwise verify the frozen persisted inputs from `input_fingerprints`
+4. Train with `random_seed` over `training_start_date` through `training_end_date`
+5. Predict over `test_start_date` through `test_end_date`
 6. Verify byte-identical predictions
 
 ---
