@@ -62,6 +62,7 @@ from silver.reports.falsifier import (  # noqa: E402
     FalsifierDataCoverage,
     FalsifierFeatureMetadata,
     FalsifierInputCounts,
+    FalsifierModelWindow,
     FalsifierReport,
     FalsifierReproducibilityMetadata,
     FalsifierRunIdentity,
@@ -305,6 +306,11 @@ def run_report_with_metadata(
     git_sha = _git_sha()
     input_fingerprint = fingerprint_momentum_inputs(persisted_inputs.rows)
     data_coverage = coverage_from_rows(persisted_inputs.rows)
+    model_window = _model_run_window(
+        persisted_inputs.rows,
+        calendar=calendar,
+        horizon=args.horizon,
+    )
     model_run = metadata_repository.create_model_run(
         _model_run_create(
             args,
@@ -313,7 +319,7 @@ def run_report_with_metadata(
             git_sha=git_sha,
             input_fingerprint=input_fingerprint,
             data_coverage=data_coverage,
-            calendar=calendar,
+            window=model_window,
         )
     )
     backtest_run = metadata_repository.create_backtest_run(
@@ -360,7 +366,16 @@ def run_report_with_metadata(
                     backtest_run_id=backtest_run.id,
                     backtest_run_key=backtest_run.backtest_run_key,
                 ),
-                random_seed=DEFAULT_LABEL_SCRAMBLE_SEED,
+                model_window=FalsifierModelWindow(
+                    training_start_date=model_window.training_start_date,
+                    training_end_date=model_window.training_end_date,
+                    test_start_date=model_window.test_start_date,
+                    test_end_date=model_window.test_end_date,
+                    source=model_window.source,
+                ),
+                target_kind=persisted_inputs.target_kind,
+                random_seed=FALSIFIER_RANDOM_SEED,
+                execution_assumptions=_execution_assumptions(),
             ),
         )
     except Exception as exc:
@@ -580,6 +595,19 @@ def _model_run_cost_assumptions() -> dict[str, object]:
             "for each scored test date"
         ),
         "round_trip_cost_bps": DEFAULT_ROUND_TRIP_COST_BPS,
+    }
+
+
+def _execution_assumptions() -> dict[str, object]:
+    return {
+        "label_scramble_alpha": LABEL_SCRAMBLE_ALPHA,
+        "label_scramble_seed": DEFAULT_LABEL_SCRAMBLE_SEED,
+        "label_scramble_trial_count": DEFAULT_LABEL_SCRAMBLE_TRIAL_COUNT,
+        "min_train_sessions": DEFAULT_MIN_TRAIN_SESSIONS,
+        "multiple_comparisons_correction": MULTIPLE_COMPARISONS_CORRECTION,
+        "round_trip_cost_bps": DEFAULT_ROUND_TRIP_COST_BPS,
+        "step_sessions": DEFAULT_STEP_SESSIONS,
+        "test_sessions": DEFAULT_TEST_SESSIONS,
     }
 
 
@@ -1049,13 +1077,8 @@ def _model_run_create(
     git_sha: str,
     input_fingerprint: str,
     data_coverage: FalsifierDataCoverage,
-    calendar: TradingCalendar,
+    window: ModelRunWindow,
 ) -> ModelRunCreate:
-    window = _model_run_window(
-        persisted_inputs.rows,
-        calendar=calendar,
-        horizon=args.horizon,
-    )
     return ModelRunCreate(
         model_run_key=_model_run_key(args, git_sha, input_fingerprint),
         name=FALSIFIER_MODEL_RUN_NAME,
@@ -1310,7 +1333,7 @@ def _traceability_mismatches(
 ) -> list[str]:
     result = report.backtest_result
     mismatches: list[str] = []
-    checks = (
+    checks: list[tuple[str, object, object]] = [
         ("model_runs.id", snapshot.model_run_id, identity.model_run_id),
         (
             "model_runs.model_run_key",
@@ -1329,7 +1352,16 @@ def _traceability_mismatches(
             report.feature_metadata.feature_set_hash,
         ),
         ("model_runs.horizon_days", snapshot.model_horizon_days, report.horizon),
-        ("model_runs.random_seed", snapshot.model_random_seed, FALSIFIER_RANDOM_SEED),
+        (
+            "model_runs.target_kind",
+            snapshot.model_target_kind,
+            report.reproducibility.target_kind,
+        ),
+        (
+            "model_runs.random_seed",
+            snapshot.model_random_seed,
+            report.reproducibility.random_seed,
+        ),
         (
             "model_runs.cost_assumptions",
             snapshot.model_cost_assumptions,
@@ -1347,6 +1379,11 @@ def _traceability_mismatches(
                 "joined_feature_label_rows_sha256",
             ),
             report.reproducibility.input_fingerprint,
+        ),
+        (
+            "report.execution_assumptions",
+            report.reproducibility.execution_assumptions,
+            _execution_assumptions_from_snapshot(snapshot),
         ),
         ("backtest_runs.id", snapshot.backtest_run_id, identity.backtest_run_id),
         (
@@ -1396,7 +1433,42 @@ def _traceability_mismatches(
             snapshot.backtest_multiple_comparisons_correction,
             MULTIPLE_COMPARISONS_CORRECTION,
         ),
-    )
+    ]
+
+    model_window = report.reproducibility.model_window
+    if model_window is None:
+        mismatches.append("report reproducibility metadata missing model window")
+    else:
+        checks.extend(
+            [
+                (
+                    "model_runs.training_start_date",
+                    snapshot.model_training_start_date,
+                    model_window.training_start_date,
+                ),
+                (
+                    "model_runs.training_end_date",
+                    snapshot.model_training_end_date,
+                    model_window.training_end_date,
+                ),
+                (
+                    "model_runs.test_start_date",
+                    snapshot.model_test_start_date,
+                    model_window.test_start_date,
+                ),
+                (
+                    "model_runs.test_end_date",
+                    snapshot.model_test_end_date,
+                    model_window.test_end_date,
+                ),
+                (
+                    "model_runs.parameters.window_source",
+                    snapshot.model_parameters.get("window_source"),
+                    model_window.source,
+                ),
+            ]
+        )
+
     for field, actual, expected in checks:
         _expect_trace_value(mismatches, field, actual=actual, expected=expected)
     if expected_backtest_finish is not None:
@@ -1415,6 +1487,31 @@ def _traceability_mismatches(
         for field, actual, expected in label_checks:
             _expect_trace_value(mismatches, field, actual=actual, expected=expected)
     return mismatches
+
+
+def _execution_assumptions_from_snapshot(
+    snapshot: BacktestTraceabilitySnapshot,
+) -> dict[str, object]:
+    return {
+        "label_scramble_alpha": snapshot.backtest_parameters.get(
+            "label_scramble_alpha"
+        ),
+        "label_scramble_seed": snapshot.backtest_parameters.get(
+            "label_scramble_seed"
+        ),
+        "label_scramble_trial_count": snapshot.backtest_parameters.get(
+            "label_scramble_trial_count"
+        ),
+        "min_train_sessions": snapshot.model_parameters.get("min_train_sessions"),
+        "multiple_comparisons_correction": (
+            snapshot.backtest_multiple_comparisons_correction
+        ),
+        "round_trip_cost_bps": snapshot.backtest_cost_assumptions.get(
+            "round_trip_cost_bps"
+        ),
+        "step_sessions": snapshot.model_parameters.get("step_sessions"),
+        "test_sessions": snapshot.model_parameters.get("test_sessions"),
+    }
 
 
 def _expect_trace_value(
