@@ -24,8 +24,17 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW_PATH = ROOT / "WORKFLOW.md"
 DEFAULT_REQUIRED_CHECKS = ("Python 3.10 checks",)
+MERGING_STATE = "Merging"
+TERMINAL_STATE_NAMES = frozenset(("Done", "Canceled", "Duplicate"))
 
-IssueAction = Literal["queue", "mark_done", "move_rework", "wait", "skip"]
+IssueAction = Literal[
+    "queue",
+    "mark_done",
+    "stale_mark_done",
+    "move_rework",
+    "wait",
+    "skip",
+]
 
 
 class MergeStewardError(RuntimeError):
@@ -112,7 +121,7 @@ class LinearClient:
             raise MergeStewardError(f"Linear returned errors: {payload['errors']}")
         return payload["data"]
 
-    def merging_issues(self, project_id_or_slug: str) -> tuple[LinearIssue, ...]:
+    def project_issues(self, project_id_or_slug: str) -> tuple[LinearIssue, ...]:
         query = """
         query($project: String!) {
           project(id: $project) {
@@ -136,21 +145,17 @@ class LinearClient:
                 f"Linear project not found: {project_id_or_slug!r}"
             )
 
-        merging_nodes = [
-            node
-            for node in project["issues"]["nodes"]
-            if node["state"]["name"] == "Merging"
-        ]
-        if not merging_nodes:
+        issue_nodes = project["issues"]["nodes"]
+        if not issue_nodes:
             return ()
 
         states_by_team = {
             team_id: self.team_states(team_id)
-            for team_id in {node["team"]["id"] for node in merging_nodes}
+            for team_id in {node["team"]["id"] for node in issue_nodes}
         }
 
         issues: list[LinearIssue] = []
-        for node in merging_nodes:
+        for node in issue_nodes:
             state = node["state"]["name"]
             issues.append(
                 LinearIssue(
@@ -163,6 +168,9 @@ class LinearClient:
                 )
             )
         return tuple(issues)
+
+    def merging_issues(self, project_id_or_slug: str) -> tuple[LinearIssue, ...]:
+        return merging_issue_candidates(self.project_issues(project_id_or_slug))
 
     def team_states(self, team_id: str) -> Mapping[str, LinearState]:
         query = """
@@ -422,15 +430,39 @@ def run_once(
     github: GitHubClient,
     required_checks: Sequence[str],
 ) -> None:
-    issues = linear.merging_issues(args.project)
-    if not issues:
+    project_issues = linear.project_issues(args.project)
+    merging_issues = merging_issue_candidates(project_issues)
+    stale_issues = stale_reconciliation_candidates(project_issues)
+
+    if not merging_issues:
         print("No Linear issues in Merging.")
+
+    if not merging_issues and not stale_issues:
+        print("No stale nonterminal Linear issues to reconcile.")
         return
 
     pull_requests = github.list_pull_requests(args.limit)
-    for issue in issues:
+    for issue in merging_issues:
         pr = choose_pr_for_issue(issue, pull_requests)
         decision = decide_issue_action(issue, pr, required_checks)
+        print(format_decision(issue, decision, pr))
+        if args.dry_run:
+            continue
+        apply_decision(issue=issue, pr=pr, decision=decision, linear=linear, github=github)
+
+    stale_actions: list[tuple[LinearIssue, PullRequest | None, Decision]] = []
+    for issue in stale_issues:
+        pr = choose_pr_for_issue(issue, pull_requests)
+        decision = decide_stale_issue_action(issue, pr)
+        if decision.action != "stale_mark_done":
+            continue
+        stale_actions.append((issue, pr, decision))
+
+    if not stale_actions:
+        print("No stale merged Linear issues to reconcile.")
+        return
+
+    for issue, pr, decision in stale_actions:
         print(format_decision(issue, decision, pr))
         if args.dry_run:
             continue
@@ -451,7 +483,7 @@ def apply_decision(
         github.queue_pull_request(decision.pr_number)
         return
 
-    if decision.action == "mark_done":
+    if decision.action in {"mark_done", "stale_mark_done"}:
         done_state = issue.team_states.get("Done")
         if done_state is None:
             raise MergeStewardError(f"{issue.identifier}: Linear state Done not found")
@@ -522,6 +554,40 @@ def decide_issue_action(
     return Decision("queue", "PR is approved, green, and mergeable", pr.number)
 
 
+def decide_stale_issue_action(
+    issue: LinearIssue,
+    pr: PullRequest | None,
+) -> Decision:
+    if issue.state == MERGING_STATE:
+        return Decision(
+            "skip",
+            f"{issue.identifier}: issue is already handled by Merging queue",
+        )
+    if issue.state in TERMINAL_STATE_NAMES:
+        return Decision(
+            "skip",
+            f"{issue.identifier}: terminal Linear state {issue.state}",
+        )
+    if pr is None:
+        return Decision(
+            "skip",
+            f"{issue.identifier}: no matching pull request found",
+        )
+
+    if pr.state == "MERGED" or pr.merged_at:
+        return Decision(
+            "stale_mark_done",
+            f"stale nonterminal issue in {issue.state} has merged PR",
+            pr.number,
+        )
+
+    return Decision(
+        "skip",
+        f"{issue.identifier}: matching PR is not merged ({pr.state.lower()})",
+        pr.number,
+    )
+
+
 def required_check_status(
     pr: PullRequest,
     required_checks: Sequence[str],
@@ -559,6 +625,23 @@ def required_check_status(
             pr.number,
         )
     return Decision("queue", "required checks passed", pr.number)
+
+
+def merging_issue_candidates(
+    issues: Sequence[LinearIssue],
+) -> tuple[LinearIssue, ...]:
+    return tuple(issue for issue in issues if issue.state == MERGING_STATE)
+
+
+def stale_reconciliation_candidates(
+    issues: Sequence[LinearIssue],
+) -> tuple[LinearIssue, ...]:
+    terminal_states = {state.lower() for state in TERMINAL_STATE_NAMES}
+    return tuple(
+        issue
+        for issue in issues
+        if issue.state != MERGING_STATE and issue.state.lower() not in terminal_states
+    )
 
 
 def choose_pr_for_issue(
