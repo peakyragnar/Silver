@@ -4,15 +4,15 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date
-from typing import Mapping, Sequence
+from typing import Any, Mapping, Sequence
 
 from silver.backtest.momentum_falsifier import MomentumBacktestRow
 from silver.backtest.momentum_falsifier import MomentumFalsifierResult
 
 
-REPORT_SCHEMA_VERSION = 2
+REPORT_SCHEMA_VERSION = 3
 
 
 @dataclass(frozen=True, slots=True)
@@ -58,6 +58,17 @@ class FalsifierRunIdentity:
 
 
 @dataclass(frozen=True, slots=True)
+class FalsifierModelWindow:
+    """Durable training/test date window recorded for a model run."""
+
+    training_start_date: date
+    training_end_date: date
+    test_start_date: date
+    test_end_date: date
+    source: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class FalsifierReproducibilityMetadata:
     """Stable run metadata for reproducing a falsifier report."""
 
@@ -66,8 +77,11 @@ class FalsifierReproducibilityMetadata:
     input_fingerprint: str
     available_at_policy_versions: Mapping[str, int]
     run_identity: FalsifierRunIdentity | None = None
-    report_schema_version: int = REPORT_SCHEMA_VERSION
+    model_window: FalsifierModelWindow | None = None
+    target_kind: str | None = None
     random_seed: int | None = None
+    execution_assumptions: Mapping[str, Any] = field(default_factory=dict)
+    report_schema_version: int = REPORT_SCHEMA_VERSION
 
 
 @dataclass(frozen=True, slots=True)
@@ -398,12 +412,38 @@ def _reproducibility_rows(report: FalsifierReport) -> tuple[tuple[str, str], ...
             ("backtest_run_key", identity.backtest_run_key),
         )
 
+    model_window = report.reproducibility.model_window
+    model_window_rows: tuple[tuple[str, str], ...] = ()
+    if model_window is not None:
+        model_window_rows = (
+            (
+                "Model training window",
+                _date_range(
+                    model_window.training_start_date,
+                    model_window.training_end_date,
+                ),
+            ),
+            (
+                "Model test window",
+                _date_range(
+                    model_window.test_start_date,
+                    model_window.test_end_date,
+                ),
+            ),
+            ("Model window source", model_window.source or "unknown"),
+        )
+
     return (
         ("Command", f"`{report.reproducibility.command}`"),
         *identity_rows,
         ("Git SHA", report.reproducibility.git_sha),
         ("Feature definition hash", report.feature_metadata.definition_hash),
         ("Feature set hash", report.feature_metadata.feature_set_hash),
+        *model_window_rows,
+        (
+            "Target kind",
+            report.reproducibility.target_kind or "unknown",
+        ),
         ("Input fingerprint", report.reproducibility.input_fingerprint),
         (
             "Available-at policy versions",
@@ -416,6 +456,10 @@ def _reproducibility_rows(report: FalsifierReport) -> tuple[tuple[str, str], ...
                 if report.reproducibility.random_seed is None
                 else str(report.reproducibility.random_seed)
             ),
+        ),
+        (
+            "Execution assumptions",
+            _json_mapping(report.reproducibility.execution_assumptions),
         ),
         (
             "Report schema version",
@@ -457,8 +501,16 @@ def _difference(left: float | None, right: float | None) -> float | None:
     return left - right
 
 
-def _json_mapping(values: Mapping[str, int]) -> str:
-    return "`" + json.dumps(dict(sorted(values.items())), separators=(",", ":")) + "`"
+def _json_mapping(values: Mapping[str, Any]) -> str:
+    return (
+        "`"
+        + json.dumps(
+            dict(sorted(values.items())),
+            allow_nan=False,
+            separators=(",", ":"),
+        )
+        + "`"
+    )
 
 
 def _float_token(value: float) -> str:

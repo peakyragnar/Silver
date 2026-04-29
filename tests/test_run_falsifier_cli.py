@@ -132,6 +132,22 @@ def test_report_run_creates_and_finishes_model_and_backtest_success(
     report_text = (tmp_path / "report.md").read_text(encoding="utf-8")
     assert "| model_run_id | 1 |" in report_text
     assert "| backtest_run_id | 2 |" in report_text
+    assert (
+        "| Model training window | "
+        f"{model_create.training_start_date.isoformat()} to "
+        f"{model_create.training_end_date.isoformat()} |"
+    ) in report_text
+    assert (
+        "| Model test window | "
+        f"{model_create.test_start_date.isoformat()} to "
+        f"{model_create.test_end_date.isoformat()} |"
+    ) in report_text
+    assert "| Target kind | excess_return_market |" in report_text
+    assert "| Random seed | 0 |" in report_text
+    assert '"label_scramble_seed":44' in report_text
+    assert '"min_train_sessions":252' in report_text
+    assert '"round_trip_cost_bps":20.0' in report_text
+    assert "| Report schema version | 3 |" in report_text
 
 
 def test_report_traceability_validation_fails_clearly_on_metadata_mismatch(
@@ -402,11 +418,17 @@ class FakeMetadataRepository:
             "model_status": model_finish.status,
             "model_code_git_sha": model_create.code_git_sha,
             "model_feature_set_hash": model_create.feature_set_hash,
+            "model_feature_snapshot_ref": model_create.feature_snapshot_ref,
+            "model_training_start_date": model_create.training_start_date,
+            "model_training_end_date": model_create.training_end_date,
+            "model_test_start_date": model_create.test_start_date,
+            "model_test_end_date": model_create.test_end_date,
             "model_horizon_days": model_create.horizon_days,
             "model_target_kind": model_create.target_kind,
             "model_random_seed": model_create.random_seed,
             "model_cost_assumptions": dict(model_create.cost_assumptions),
             "model_metrics": dict(model_finish.metrics),
+            "model_parameters": dict(model_create.parameters),
             "model_available_at_policy_versions": dict(
                 model_create.available_at_policy_versions,
             ),
@@ -421,6 +443,7 @@ class FakeMetadataRepository:
             "backtest_cost_assumptions": dict(backtest_finish.cost_assumptions),
             "backtest_metrics": dict(backtest_finish.metrics),
             "backtest_baseline_metrics": dict(backtest_finish.baseline_metrics),
+            "backtest_parameters": dict(backtest_create.parameters),
             "backtest_multiple_comparisons_correction": (
                 backtest_finish.multiple_comparisons_correction
             ),

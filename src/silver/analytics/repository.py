@@ -116,11 +116,17 @@ class BacktestTraceabilitySnapshot:
     model_status: str
     model_code_git_sha: str
     model_feature_set_hash: str
+    model_feature_snapshot_ref: str | None
+    model_training_start_date: date
+    model_training_end_date: date
+    model_test_start_date: date
+    model_test_end_date: date
     model_horizon_days: int
     model_target_kind: str
     model_random_seed: int
     model_cost_assumptions: Mapping[str, Any]
     model_metrics: Mapping[str, Any]
+    model_parameters: Mapping[str, Any]
     model_available_at_policy_versions: Mapping[str, Any]
     model_input_fingerprints: Mapping[str, Any]
     backtest_run_id: int
@@ -133,6 +139,7 @@ class BacktestTraceabilitySnapshot:
     backtest_cost_assumptions: Mapping[str, Any]
     backtest_metrics: Mapping[str, Any]
     backtest_baseline_metrics: Mapping[str, Any]
+    backtest_parameters: Mapping[str, Any]
     backtest_multiple_comparisons_correction: str | None
 
 
@@ -560,112 +567,154 @@ def _backtest_traceability_snapshot(row: object) -> BacktestTraceabilitySnapshot
             4,
             "model_runs.feature_set_hash",
         ),
+        model_feature_snapshot_ref=_metadata_row_optional_str(
+            row,
+            "model_feature_snapshot_ref",
+            5,
+            "model_runs.feature_snapshot_ref",
+        ),
+        model_training_start_date=_metadata_row_date(
+            row,
+            "model_training_start_date",
+            6,
+            "model_runs.training_start_date",
+        ),
+        model_training_end_date=_metadata_row_date(
+            row,
+            "model_training_end_date",
+            7,
+            "model_runs.training_end_date",
+        ),
+        model_test_start_date=_metadata_row_date(
+            row,
+            "model_test_start_date",
+            8,
+            "model_runs.test_start_date",
+        ),
+        model_test_end_date=_metadata_row_date(
+            row,
+            "model_test_end_date",
+            9,
+            "model_runs.test_end_date",
+        ),
         model_horizon_days=_metadata_row_int(
             row,
             "model_horizon_days",
-            5,
+            10,
             "model_runs.horizon_days",
         ),
         model_target_kind=_metadata_row_str(
             row,
             "model_target_kind",
-            6,
+            11,
             "model_runs.target_kind",
         ),
         model_random_seed=_metadata_row_int(
             row,
             "model_random_seed",
-            7,
+            12,
             "model_runs.random_seed",
         ),
         model_cost_assumptions=_metadata_row_json_object(
             row,
             "model_cost_assumptions",
-            8,
+            13,
             "model_runs.cost_assumptions",
         ),
         model_metrics=_metadata_row_json_object(
             row,
             "model_metrics",
-            9,
+            14,
             "model_runs.metrics",
+        ),
+        model_parameters=_metadata_row_json_object(
+            row,
+            "model_parameters",
+            15,
+            "model_runs.parameters",
         ),
         model_available_at_policy_versions=_metadata_row_json_object(
             row,
             "model_available_at_policy_versions",
-            10,
+            16,
             "model_runs.available_at_policy_versions",
         ),
         model_input_fingerprints=_metadata_row_json_object(
             row,
             "model_input_fingerprints",
-            11,
+            17,
             "model_runs.input_fingerprints",
         ),
         backtest_run_id=_metadata_row_int(
             row,
             "backtest_run_id",
-            12,
+            18,
             "backtest_runs.id",
         ),
         backtest_run_key=_metadata_row_str(
             row,
             "backtest_run_key",
-            13,
+            19,
             "backtest_runs.backtest_run_key",
         ),
         backtest_status=_metadata_row_str(
             row,
             "backtest_status",
-            14,
+            20,
             "backtest_runs.status",
         ),
         backtest_model_run_id=_metadata_row_int(
             row,
             "backtest_model_run_id",
-            15,
+            21,
             "backtest_runs.model_run_id",
         ),
         backtest_universe_name=_metadata_row_str(
             row,
             "backtest_universe_name",
-            16,
+            22,
             "backtest_runs.universe_name",
         ),
         backtest_horizon_days=_metadata_row_int(
             row,
             "backtest_horizon_days",
-            17,
+            23,
             "backtest_runs.horizon_days",
         ),
         backtest_target_kind=_metadata_row_str(
             row,
             "backtest_target_kind",
-            18,
+            24,
             "backtest_runs.target_kind",
         ),
         backtest_cost_assumptions=_metadata_row_json_object(
             row,
             "backtest_cost_assumptions",
-            19,
+            25,
             "backtest_runs.cost_assumptions",
         ),
         backtest_metrics=_metadata_row_json_object(
             row,
             "backtest_metrics",
-            20,
+            26,
             "backtest_runs.metrics",
         ),
         backtest_baseline_metrics=_metadata_row_json_object(
             row,
             "backtest_baseline_metrics",
-            21,
+            27,
             "backtest_runs.baseline_metrics",
+        ),
+        backtest_parameters=_metadata_row_json_object(
+            row,
+            "backtest_parameters",
+            28,
+            "backtest_runs.parameters",
         ),
         backtest_multiple_comparisons_correction=_metadata_row_optional_str(
             row,
             "backtest_multiple_comparisons_correction",
-            22,
+            29,
             "backtest_runs.multiple_comparisons_correction",
         ),
     )
@@ -1191,11 +1240,17 @@ SELECT
     mr.status AS model_status,
     mr.code_git_sha AS model_code_git_sha,
     mr.feature_set_hash AS model_feature_set_hash,
+    mr.feature_snapshot_ref AS model_feature_snapshot_ref,
+    mr.training_start_date AS model_training_start_date,
+    mr.training_end_date AS model_training_end_date,
+    mr.test_start_date AS model_test_start_date,
+    mr.test_end_date AS model_test_end_date,
     mr.horizon_days AS model_horizon_days,
     mr.target_kind AS model_target_kind,
     mr.random_seed AS model_random_seed,
     mr.cost_assumptions AS model_cost_assumptions,
     mr.metrics AS model_metrics,
+    mr.parameters AS model_parameters,
     mr.available_at_policy_versions AS model_available_at_policy_versions,
     mr.input_fingerprints AS model_input_fingerprints,
     br.id AS backtest_run_id,
@@ -1208,6 +1263,7 @@ SELECT
     br.cost_assumptions AS backtest_cost_assumptions,
     br.metrics AS backtest_metrics,
     br.baseline_metrics AS backtest_baseline_metrics,
+    br.parameters AS backtest_parameters,
     br.multiple_comparisons_correction AS backtest_multiple_comparisons_correction
 FROM silver.backtest_runs br
 JOIN silver.model_runs mr ON mr.id = br.model_run_id
