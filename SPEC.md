@@ -570,6 +570,22 @@ CREATE TABLE silver.prediction_outcomes (
 );
 ```
 
+The durable backtest metadata registry is the pair
+`silver.model_runs` + `silver.backtest_runs`. A backtest claim is accepted only
+when the `backtest_runs` row is terminal with `status = 'succeeded'` and the
+row has non-empty headline metrics, cost assumptions, baseline metrics, regime
+metrics, label-scramble evidence, and the multiple-comparisons setting used for
+that claim. `failed` and `insufficient_data` rows are audit evidence, not
+accepted alpha claims; `running` rows must not be reported as results.
+
+The stable claim identity is `backtest_runs.id` plus `backtest_run_key`. It must
+resolve through `backtest_runs.model_run_id` to exactly one `model_runs` row
+containing the frozen code SHA, feature-set hash, feature snapshot or input
+fingerprints, training/test window, horizon, target kind, random seed,
+cost/execution assumptions, parameters, available-at policy versions, and final
+model-run status. Reports may echo command-line metadata, but the registry rows
+are the source of truth for reproducing or rejecting a reported backtest.
+
 ### 7.11 Hypotheses
 
 ```sql
@@ -1009,6 +1025,12 @@ Every result row carries enough metadata to rebuild it from source:
 | `feature_values` row | `feature_definition_id` (which encodes `model_version` + `prompt_version`), `source_event_id` or `source_artifact_id`, `computed_at` |
 | `predictions` row | `model_run_id` (which encodes `code_git_sha`, `feature_set_hash`, `feature_snapshot_ref`, training/test date windows, `random_seed`, `cost_assumptions`, `parameters`, `available_at_policy_versions`, and `input_fingerprints`) |
 | `backtest_runs` row | All of the model-run metadata by `model_run_id` plus `backtest_run_key`, `universe_name`, `cost_assumptions`, `metrics`, `metrics_by_regime`, `baseline_metrics`, `label_scramble_metrics`, `label_scramble_pass`, `multiple_comparisons_correction`, and final `status` |
+
+Accepted backtest claims are traced from the reported `backtest_run_key` or
+`backtest_run_id` to `backtest_runs`, then across the durable
+`backtest_runs.model_run_id` join to `model_runs`. A report that cannot resolve
+that join, or whose report metadata disagrees with the joined registry rows, is
+not reproducible and must not be used as evidence for the thesis.
 
 Replay procedure:
 1. Check out `code_git_sha`

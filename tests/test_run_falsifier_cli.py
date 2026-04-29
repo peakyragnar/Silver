@@ -125,6 +125,7 @@ def test_report_run_creates_and_finishes_model_and_backtest_success(
     _backtest_run_id, backtest_finish = repo.backtest_finishes[0]
     assert backtest_finish.status == "succeeded"
     assert backtest_finish.metrics["mean_strategy_net_horizon_return"] is not None
+    assert backtest_finish.metrics_by_regime
     assert "equal_weight_universe" in backtest_finish.baseline_metrics
     assert backtest_finish.label_scramble_metrics["status"] == "completed"
     assert backtest_finish.label_scramble_pass is True
@@ -133,6 +134,22 @@ def test_report_run_creates_and_finishes_model_and_backtest_success(
     report_text = (tmp_path / "report.md").read_text(encoding="utf-8")
     assert "| model_run_id | 1 |" in report_text
     assert "| backtest_run_id | 2 |" in report_text
+    assert (
+        "| Model training window | "
+        f"{model_create.training_start_date.isoformat()} to "
+        f"{model_create.training_end_date.isoformat()} |"
+    ) in report_text
+    assert (
+        "| Model test window | "
+        f"{model_create.test_start_date.isoformat()} to "
+        f"{model_create.test_end_date.isoformat()} |"
+    ) in report_text
+    assert "| Target kind | excess_return_market |" in report_text
+    assert "| Random seed | 0 |" in report_text
+    assert '"label_scramble_seed":44' in report_text
+    assert '"min_train_sessions":252' in report_text
+    assert '"round_trip_cost_bps":20.0' in report_text
+    assert "| Report schema version | 3 |" in report_text
 
 
 def test_model_run_create_uses_stable_key_for_same_frozen_metadata(
@@ -152,6 +169,11 @@ def test_model_run_create_uses_stable_key_for_same_frozen_metadata(
     feature_set_hash = cli._feature_set_hash(persisted_inputs.feature_definition)
     input_fingerprint = cli.fingerprint_momentum_inputs(rows)
     data_coverage = cli.coverage_from_rows(rows)
+    model_window = cli._model_run_window(
+        persisted_inputs.rows,
+        calendar=calendar,
+        horizon=args.horizon,
+    )
 
     first = cli._model_run_create(
         args,
@@ -160,7 +182,7 @@ def test_model_run_create_uses_stable_key_for_same_frozen_metadata(
         git_sha="abcdef0",
         input_fingerprint=input_fingerprint,
         data_coverage=data_coverage,
-        calendar=calendar,
+        window=model_window,
     )
     second = cli._model_run_create(
         args,
@@ -169,7 +191,7 @@ def test_model_run_create_uses_stable_key_for_same_frozen_metadata(
         git_sha="abcdef0",
         input_fingerprint=input_fingerprint,
         data_coverage=data_coverage,
-        calendar=calendar,
+        window=model_window,
     )
     changed_input = cli._model_run_create(
         args,
@@ -178,7 +200,7 @@ def test_model_run_create_uses_stable_key_for_same_frozen_metadata(
         git_sha="abcdef0",
         input_fingerprint="f" * 64,
         data_coverage=data_coverage,
-        calendar=calendar,
+        window=model_window,
     )
 
     assert first.model_run_key == second.model_run_key
@@ -216,6 +238,55 @@ def test_report_traceability_validation_fails_clearly_on_metadata_mismatch(
         cli.FalsifierCliError,
         match="model_runs.code_git_sha",
     ):
+        cli.run_report_with_metadata(
+            args,
+            client=object(),
+            metadata_repository=repo,
+            calendar=calendar,
+        )
+
+    assert repo.traceability_loads == [2]
+    assert not (tmp_path / "report.md").exists()
+
+
+@pytest.mark.parametrize(
+    ("traceability_overrides", "expected_field"),
+    (
+        ({"backtest_metrics_by_regime": {}}, "backtest_runs.metrics_by_regime"),
+        (
+            {"backtest_label_scramble_metrics": {"status": "not_run"}},
+            "backtest_runs.label_scramble_metrics",
+        ),
+        ({"backtest_label_scramble_pass": False}, "backtest_runs.label_scramble_pass"),
+    ),
+)
+def test_report_traceability_validation_checks_complete_backtest_claim_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    traceability_overrides: dict[str, Any],
+    expected_field: str,
+) -> None:
+    calendar = _calendar()
+    repo = FakeMetadataRepository(traceability_overrides=traceability_overrides)
+    args = cli.parse_args(
+        [
+            "--database-url",
+            "postgresql://user:pass@localhost/silver",
+            "--output-path",
+            str(tmp_path / "report.md"),
+        ]
+    )
+    monkeypatch.setattr(cli, "_git_sha", lambda: "abcdef0")
+    monkeypatch.setattr(cli, "run_label_scramble", _fake_label_scramble)
+    monkeypatch.setattr(
+        cli,
+        "load_persisted_inputs",
+        lambda *_args, **_kwargs: _persisted_inputs(
+            rows=_momentum_rows(calendar, session_count=420),
+        ),
+    )
+
+    with pytest.raises(cli.FalsifierCliError, match=expected_field):
         cli.run_report_with_metadata(
             args,
             client=object(),
@@ -454,11 +525,17 @@ class FakeMetadataRepository:
             "model_status": model_finish.status,
             "model_code_git_sha": model_create.code_git_sha,
             "model_feature_set_hash": model_create.feature_set_hash,
+            "model_feature_snapshot_ref": model_create.feature_snapshot_ref,
+            "model_training_start_date": model_create.training_start_date,
+            "model_training_end_date": model_create.training_end_date,
+            "model_test_start_date": model_create.test_start_date,
+            "model_test_end_date": model_create.test_end_date,
             "model_horizon_days": model_create.horizon_days,
             "model_target_kind": model_create.target_kind,
             "model_random_seed": model_create.random_seed,
             "model_cost_assumptions": dict(model_create.cost_assumptions),
             "model_metrics": dict(model_finish.metrics),
+            "model_parameters": dict(model_create.parameters),
             "model_available_at_policy_versions": dict(
                 model_create.available_at_policy_versions,
             ),
@@ -472,7 +549,13 @@ class FakeMetadataRepository:
             "backtest_target_kind": backtest_create.target_kind,
             "backtest_cost_assumptions": dict(backtest_finish.cost_assumptions),
             "backtest_metrics": dict(backtest_finish.metrics),
+            "backtest_metrics_by_regime": dict(backtest_finish.metrics_by_regime),
             "backtest_baseline_metrics": dict(backtest_finish.baseline_metrics),
+            "backtest_label_scramble_metrics": dict(
+                backtest_finish.label_scramble_metrics,
+            ),
+            "backtest_label_scramble_pass": backtest_finish.label_scramble_pass,
+            "backtest_parameters": dict(backtest_create.parameters),
             "backtest_multiple_comparisons_correction": (
                 backtest_finish.multiple_comparisons_correction
             ),
