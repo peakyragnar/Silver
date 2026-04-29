@@ -116,10 +116,16 @@ class BacktestTraceabilitySnapshot:
     model_status: str
     model_code_git_sha: str
     model_feature_set_hash: str
+    model_feature_snapshot_ref: str | None
+    model_training_start_date: date
+    model_training_end_date: date
+    model_test_start_date: date
+    model_test_end_date: date
     model_horizon_days: int
     model_target_kind: str
     model_random_seed: int
     model_cost_assumptions: Mapping[str, Any]
+    model_parameters: Mapping[str, Any]
     model_metrics: Mapping[str, Any]
     model_available_at_policy_versions: Mapping[str, Any]
     model_input_fingerprints: Mapping[str, Any]
@@ -131,8 +137,12 @@ class BacktestTraceabilitySnapshot:
     backtest_horizon_days: int
     backtest_target_kind: str
     backtest_cost_assumptions: Mapping[str, Any]
+    backtest_parameters: Mapping[str, Any]
     backtest_metrics: Mapping[str, Any]
+    backtest_metrics_by_regime: Mapping[str, Any]
     backtest_baseline_metrics: Mapping[str, Any]
+    backtest_label_scramble_metrics: Mapping[str, Any]
+    backtest_label_scramble_pass: bool | None
     backtest_multiple_comparisons_correction: str | None
 
 
@@ -384,15 +394,33 @@ def _model_run_create_params(run: ModelRunCreate) -> dict[str, Any]:
     if test_start <= training_end:
         raise BacktestMetadataError("test_start_date must be after training_end_date")
 
+    feature_snapshot_ref = _optional_metadata_label(
+        run.feature_snapshot_ref,
+        "feature_snapshot_ref",
+    )
+    cost_assumptions = _json_object(run.cost_assumptions, "cost_assumptions")
+    if not cost_assumptions:
+        raise BacktestMetadataError("cost_assumptions must be non-empty")
+    available_at_policy_versions = _json_object(
+        run.available_at_policy_versions,
+        "available_at_policy_versions",
+    )
+    if not available_at_policy_versions:
+        raise BacktestMetadataError(
+            "available_at_policy_versions must be non-empty"
+        )
+    input_fingerprints = _json_object(run.input_fingerprints, "input_fingerprints")
+    if feature_snapshot_ref is None and not input_fingerprints:
+        raise BacktestMetadataError(
+            "model runs must provide feature_snapshot_ref or input_fingerprints"
+        )
+
     return {
         "model_run_key": _metadata_label(run.model_run_key, "model_run_key"),
         "name": _metadata_label(run.name, "name"),
         "code_git_sha": _code_git_sha(run.code_git_sha),
         "feature_set_hash": _feature_set_hash(run.feature_set_hash),
-        "feature_snapshot_ref": _optional_metadata_label(
-            run.feature_snapshot_ref,
-            "feature_snapshot_ref",
-        ),
+        "feature_snapshot_ref": feature_snapshot_ref,
         "training_start_date": training_start,
         "training_end_date": training_end,
         "test_start_date": test_start,
@@ -401,16 +429,16 @@ def _model_run_create_params(run: ModelRunCreate) -> dict[str, Any]:
         "target_kind": _target_kind(run.target_kind),
         "random_seed": _non_negative_int(run.random_seed, "random_seed"),
         "cost_assumptions": _json_dumps_object(
-            run.cost_assumptions,
+            cost_assumptions,
             "cost_assumptions",
         ),
         "parameters": _json_dumps_object(run.parameters, "parameters"),
         "available_at_policy_versions": _json_dumps_object(
-            run.available_at_policy_versions,
+            available_at_policy_versions,
             "available_at_policy_versions",
         ),
         "input_fingerprints": _json_dumps_object(
-            run.input_fingerprints,
+            input_fingerprints,
             "input_fingerprints",
         ),
     }
@@ -436,6 +464,9 @@ def _model_run_finish_params(
 def _backtest_run_create_params(run: BacktestRunCreate) -> dict[str, Any]:
     if not isinstance(run, BacktestRunCreate):
         raise BacktestMetadataError("run must be a BacktestRunCreate")
+    cost_assumptions = _json_object(run.cost_assumptions, "cost_assumptions")
+    if not cost_assumptions:
+        raise BacktestMetadataError("cost_assumptions must be non-empty")
     return {
         "backtest_run_key": _metadata_label(
             run.backtest_run_key,
@@ -447,7 +478,7 @@ def _backtest_run_create_params(run: BacktestRunCreate) -> dict[str, Any]:
         "horizon_days": _horizon_days(run.horizon_days),
         "target_kind": _target_kind(run.target_kind),
         "cost_assumptions": _json_dumps_object(
-            run.cost_assumptions,
+            cost_assumptions,
             "cost_assumptions",
         ),
         "parameters": _json_dumps_object(run.parameters, "parameters"),
@@ -466,15 +497,28 @@ def _backtest_run_finish_params(
     normalized_status = _terminal_status(finish.status)
     cost_assumptions = _json_object(finish.cost_assumptions, "cost_assumptions")
     metrics = _json_object(finish.metrics, "metrics")
+    metrics_by_regime = _json_object(finish.metrics_by_regime, "metrics_by_regime")
     baseline_metrics = _json_object(finish.baseline_metrics, "baseline_metrics")
+    label_scramble_metrics = _json_object(
+        finish.label_scramble_metrics,
+        "label_scramble_metrics",
+    )
     if normalized_status == "succeeded":
         if not metrics:
             raise BacktestMetadataError(
                 "metrics must be non-empty for succeeded backtest runs"
             )
+        if not metrics_by_regime:
+            raise BacktestMetadataError(
+                "metrics_by_regime must be non-empty for succeeded backtest runs"
+            )
         if not baseline_metrics:
             raise BacktestMetadataError(
                 "baseline_metrics must be non-empty for succeeded backtest runs"
+            )
+        if not label_scramble_metrics:
+            raise BacktestMetadataError(
+                "label_scramble_metrics must be non-empty for succeeded backtest runs"
             )
         if not cost_assumptions:
             raise BacktestMetadataError(
@@ -494,7 +538,7 @@ def _backtest_run_finish_params(
         ),
         "metrics": _json_dumps_object(metrics, "metrics"),
         "metrics_by_regime": _json_dumps_object(
-            finish.metrics_by_regime,
+            metrics_by_regime,
             "metrics_by_regime",
         ),
         "baseline_metrics": _json_dumps_object(
@@ -502,7 +546,7 @@ def _backtest_run_finish_params(
             "baseline_metrics",
         ),
         "label_scramble_metrics": _json_dumps_object(
-            finish.label_scramble_metrics,
+            label_scramble_metrics,
             "label_scramble_metrics",
         ),
         "label_scramble_pass": finish.label_scramble_pass,
@@ -560,112 +604,172 @@ def _backtest_traceability_snapshot(row: object) -> BacktestTraceabilitySnapshot
             4,
             "model_runs.feature_set_hash",
         ),
+        model_feature_snapshot_ref=_metadata_row_optional_str(
+            row,
+            "model_feature_snapshot_ref",
+            5,
+            "model_runs.feature_snapshot_ref",
+        ),
+        model_training_start_date=_metadata_row_date(
+            row,
+            "model_training_start_date",
+            6,
+            "model_runs.training_start_date",
+        ),
+        model_training_end_date=_metadata_row_date(
+            row,
+            "model_training_end_date",
+            7,
+            "model_runs.training_end_date",
+        ),
+        model_test_start_date=_metadata_row_date(
+            row,
+            "model_test_start_date",
+            8,
+            "model_runs.test_start_date",
+        ),
+        model_test_end_date=_metadata_row_date(
+            row,
+            "model_test_end_date",
+            9,
+            "model_runs.test_end_date",
+        ),
         model_horizon_days=_metadata_row_int(
             row,
             "model_horizon_days",
-            5,
+            10,
             "model_runs.horizon_days",
         ),
         model_target_kind=_metadata_row_str(
             row,
             "model_target_kind",
-            6,
+            11,
             "model_runs.target_kind",
         ),
         model_random_seed=_metadata_row_int(
             row,
             "model_random_seed",
-            7,
+            12,
             "model_runs.random_seed",
         ),
         model_cost_assumptions=_metadata_row_json_object(
             row,
             "model_cost_assumptions",
-            8,
+            13,
             "model_runs.cost_assumptions",
+        ),
+        model_parameters=_metadata_row_json_object(
+            row,
+            "model_parameters",
+            14,
+            "model_runs.parameters",
         ),
         model_metrics=_metadata_row_json_object(
             row,
             "model_metrics",
-            9,
+            15,
             "model_runs.metrics",
         ),
         model_available_at_policy_versions=_metadata_row_json_object(
             row,
             "model_available_at_policy_versions",
-            10,
+            16,
             "model_runs.available_at_policy_versions",
         ),
         model_input_fingerprints=_metadata_row_json_object(
             row,
             "model_input_fingerprints",
-            11,
+            17,
             "model_runs.input_fingerprints",
         ),
         backtest_run_id=_metadata_row_int(
             row,
             "backtest_run_id",
-            12,
+            18,
             "backtest_runs.id",
         ),
         backtest_run_key=_metadata_row_str(
             row,
             "backtest_run_key",
-            13,
+            19,
             "backtest_runs.backtest_run_key",
         ),
         backtest_status=_metadata_row_str(
             row,
             "backtest_status",
-            14,
+            20,
             "backtest_runs.status",
         ),
         backtest_model_run_id=_metadata_row_int(
             row,
             "backtest_model_run_id",
-            15,
+            21,
             "backtest_runs.model_run_id",
         ),
         backtest_universe_name=_metadata_row_str(
             row,
             "backtest_universe_name",
-            16,
+            22,
             "backtest_runs.universe_name",
         ),
         backtest_horizon_days=_metadata_row_int(
             row,
             "backtest_horizon_days",
-            17,
+            23,
             "backtest_runs.horizon_days",
         ),
         backtest_target_kind=_metadata_row_str(
             row,
             "backtest_target_kind",
-            18,
+            24,
             "backtest_runs.target_kind",
         ),
         backtest_cost_assumptions=_metadata_row_json_object(
             row,
             "backtest_cost_assumptions",
-            19,
+            25,
             "backtest_runs.cost_assumptions",
+        ),
+        backtest_parameters=_metadata_row_json_object(
+            row,
+            "backtest_parameters",
+            26,
+            "backtest_runs.parameters",
         ),
         backtest_metrics=_metadata_row_json_object(
             row,
             "backtest_metrics",
-            20,
+            27,
             "backtest_runs.metrics",
+        ),
+        backtest_metrics_by_regime=_metadata_row_json_object(
+            row,
+            "backtest_metrics_by_regime",
+            28,
+            "backtest_runs.metrics_by_regime",
         ),
         backtest_baseline_metrics=_metadata_row_json_object(
             row,
             "backtest_baseline_metrics",
-            21,
+            29,
             "backtest_runs.baseline_metrics",
+        ),
+        backtest_label_scramble_metrics=_metadata_row_json_object(
+            row,
+            "backtest_label_scramble_metrics",
+            30,
+            "backtest_runs.label_scramble_metrics",
+        ),
+        backtest_label_scramble_pass=_metadata_row_optional_bool(
+            row,
+            "backtest_label_scramble_pass",
+            31,
+            "backtest_runs.label_scramble_pass",
         ),
         backtest_multiple_comparisons_correction=_metadata_row_optional_str(
             row,
             "backtest_multiple_comparisons_correction",
-            22,
+            32,
             "backtest_runs.multiple_comparisons_correction",
         ),
     )
@@ -979,6 +1083,22 @@ def _metadata_row_date(row: object, key: str, index: int, name: str) -> date:
     return value
 
 
+def _metadata_row_optional_bool(
+    row: object,
+    key: str,
+    index: int,
+    name: str,
+) -> bool | None:
+    value = _row_value(row, key, index)
+    if value is None:
+        return None
+    if not isinstance(value, bool):
+        raise BacktestMetadataError(
+            f"{name} returned by database must be a boolean or null"
+        )
+    return value
+
+
 def _metadata_row_json_object(
     row: object,
     key: str,
@@ -1191,10 +1311,16 @@ SELECT
     mr.status AS model_status,
     mr.code_git_sha AS model_code_git_sha,
     mr.feature_set_hash AS model_feature_set_hash,
+    mr.feature_snapshot_ref AS model_feature_snapshot_ref,
+    mr.training_start_date AS model_training_start_date,
+    mr.training_end_date AS model_training_end_date,
+    mr.test_start_date AS model_test_start_date,
+    mr.test_end_date AS model_test_end_date,
     mr.horizon_days AS model_horizon_days,
     mr.target_kind AS model_target_kind,
     mr.random_seed AS model_random_seed,
     mr.cost_assumptions AS model_cost_assumptions,
+    mr.parameters AS model_parameters,
     mr.metrics AS model_metrics,
     mr.available_at_policy_versions AS model_available_at_policy_versions,
     mr.input_fingerprints AS model_input_fingerprints,
@@ -1206,8 +1332,12 @@ SELECT
     br.horizon_days AS backtest_horizon_days,
     br.target_kind AS backtest_target_kind,
     br.cost_assumptions AS backtest_cost_assumptions,
+    br.parameters AS backtest_parameters,
     br.metrics AS backtest_metrics,
+    br.metrics_by_regime AS backtest_metrics_by_regime,
     br.baseline_metrics AS backtest_baseline_metrics,
+    br.label_scramble_metrics AS backtest_label_scramble_metrics,
+    br.label_scramble_pass AS backtest_label_scramble_pass,
     br.multiple_comparisons_correction AS backtest_multiple_comparisons_correction
 FROM silver.backtest_runs br
 JOIN silver.model_runs mr ON mr.id = br.model_run_id

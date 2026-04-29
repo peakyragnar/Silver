@@ -520,7 +520,13 @@ CREATE TABLE silver.model_runs (
     started_at          timestamptz NOT NULL DEFAULT now(),
     finished_at         timestamptz,
     status              text NOT NULL DEFAULT 'running',
-    created_at          timestamptz NOT NULL DEFAULT now()
+    created_at          timestamptz NOT NULL DEFAULT now(),
+    CHECK (cost_assumptions <> '{}'::jsonb),
+    CHECK (available_at_policy_versions <> '{}'::jsonb),
+    CHECK (
+        feature_snapshot_ref IS NOT NULL
+        OR input_fingerprints <> '{}'::jsonb
+    )
 );
 
 CREATE TABLE silver.backtest_runs (
@@ -542,7 +548,18 @@ CREATE TABLE silver.backtest_runs (
     started_at          timestamptz NOT NULL DEFAULT now(),
     finished_at         timestamptz,
     status              text NOT NULL DEFAULT 'running',
-    created_at          timestamptz NOT NULL DEFAULT now()
+    created_at          timestamptz NOT NULL DEFAULT now(),
+    CHECK (cost_assumptions <> '{}'::jsonb),
+    CHECK (
+        status <> 'succeeded'
+        OR (
+            cost_assumptions <> '{}'::jsonb
+            AND metrics <> '{}'::jsonb
+            AND metrics_by_regime <> '{}'::jsonb
+            AND baseline_metrics <> '{}'::jsonb
+            AND label_scramble_metrics <> '{}'::jsonb
+        )
+    )
 );
 
 CREATE TABLE silver.predictions (

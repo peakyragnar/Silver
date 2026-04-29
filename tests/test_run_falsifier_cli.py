@@ -402,10 +402,16 @@ class FakeMetadataRepository:
             "model_status": model_finish.status,
             "model_code_git_sha": model_create.code_git_sha,
             "model_feature_set_hash": model_create.feature_set_hash,
+            "model_feature_snapshot_ref": model_create.feature_snapshot_ref,
+            "model_training_start_date": model_create.training_start_date,
+            "model_training_end_date": model_create.training_end_date,
+            "model_test_start_date": model_create.test_start_date,
+            "model_test_end_date": model_create.test_end_date,
             "model_horizon_days": model_create.horizon_days,
             "model_target_kind": model_create.target_kind,
             "model_random_seed": model_create.random_seed,
             "model_cost_assumptions": dict(model_create.cost_assumptions),
+            "model_parameters": dict(model_create.parameters),
             "model_metrics": dict(model_finish.metrics),
             "model_available_at_policy_versions": dict(
                 model_create.available_at_policy_versions,
@@ -419,8 +425,14 @@ class FakeMetadataRepository:
             "backtest_horizon_days": backtest_create.horizon_days,
             "backtest_target_kind": backtest_create.target_kind,
             "backtest_cost_assumptions": dict(backtest_finish.cost_assumptions),
+            "backtest_parameters": dict(backtest_create.parameters),
             "backtest_metrics": dict(backtest_finish.metrics),
+            "backtest_metrics_by_regime": dict(backtest_finish.metrics_by_regime),
             "backtest_baseline_metrics": dict(backtest_finish.baseline_metrics),
+            "backtest_label_scramble_metrics": dict(
+                backtest_finish.label_scramble_metrics,
+            ),
+            "backtest_label_scramble_pass": backtest_finish.label_scramble_pass,
             "backtest_multiple_comparisons_correction": (
                 backtest_finish.multiple_comparisons_correction
             ),

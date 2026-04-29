@@ -73,15 +73,19 @@ Runtime wiring tests for `model_runs` must prove each persisted model run has a
 stable key, code SHA, feature-set hash, frozen feature snapshot or input
 fingerprint, training/test windows, horizon, target kind, random seed,
 cost-assumption set, parameters, and available-at policy versions.
+Schema and repository tests must reject rows missing non-empty cost assumptions,
+policy versions, or replay inputs.
 
 Runtime wiring tests for `backtest_runs` must prove each persisted backtest run
 has a stable key, a `model_run_id`, universe, horizon, target kind,
 cost-assumption set, baseline metrics, headline metrics, regime metrics,
 label-scramble result, multiple-comparisons setting when applicable, and a final
-status. `insufficient_data` is a valid terminal status but is not an accepted
-backtest claim; tests should assert it sets `finished_at`, records deterministic
-insufficiency metadata, and satisfies the shipped `label_scramble_pass`
-constraint without reporting alpha.
+status. Schema and repository tests must reject a `succeeded` accepted-claim row
+that omits costs, headline metrics, regime metrics, baselines, or
+label-scramble metrics. `insufficient_data` is a valid terminal status but is
+not an accepted backtest claim; tests should assert it sets `finished_at`,
+records deterministic insufficiency metadata, and satisfies the shipped
+`label_scramble_pass` constraint without reporting alpha.
 
 ## Reporting
 
@@ -94,6 +98,9 @@ Falsifier report traceability validation must resolve the reported
 `model_runs` before the report artifact is written. The validation checks the
 reported code SHA, feature-set hash, horizon, universe, cost assumptions,
 baseline metrics, headline metrics, available-at policy versions, and joined
-input fingerprint against stored metadata. The replay path is covered by
+input fingerprint against stored metadata. The traceability snapshot must also
+expose the stored training/test windows, parameters, regime metrics, and
+label-scramble payloads needed to audit the run identity. The replay path is
+covered by
 `test_traceability_snapshot_resolves_backtest_run_to_model_run_metadata` and
 `test_report_traceability_validation_fails_clearly_on_metadata_mismatch`.

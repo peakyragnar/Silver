@@ -49,8 +49,8 @@ Phase 2 starts the durable backtest reproducibility registry with
 `silver.model_runs` and `silver.backtest_runs`. These tables hold run metadata
 only until model and backtest runners are explicitly wired to write them.
 
-Runtime writers must treat migration `004_backtest_metadata.sql` as the table
-shape contract:
+Runtime writers must treat migrations `004_backtest_metadata.sql` and
+`005_backtest_metadata_replay_constraints.sql` as the table shape contract:
 
 - `model_run_key` and `backtest_run_key` are stable, non-empty external keys
   for idempotent writes. `backtest_runs.model_run_id` is the durable join back
@@ -59,25 +59,21 @@ shape contract:
   `feature_set_hash`, `feature_snapshot_ref`, training/test date windows,
   `horizon_days`, `target_kind`, `random_seed`, `cost_assumptions`,
   `parameters`, `available_at_policy_versions`, and `input_fingerprints`.
+  Cost assumptions and policy versions must be non-empty, and each row must
+  carry either a frozen feature snapshot reference or non-empty input
+  fingerprints.
 - `backtest_runs` maps claim evidence through `universe_name`, `horizon_days`,
   `target_kind`, `cost_assumptions`, `parameters`, `metrics`,
   `metrics_by_regime`, `baseline_metrics`, `label_scramble_metrics`,
   `label_scramble_pass`, and `multiple_comparisons_correction`.
 - Valid statuses are `running`, `succeeded`, `failed`, and
   `insufficient_data`. `running` rows have no `finished_at`; every terminal
-  status sets `finished_at`. `succeeded` rows must have non-empty `metrics`.
-- `insufficient_data` is a terminal no-claim status. Until a migration review
-  changes the shipped constraint, runtime writers must set
+  status sets `finished_at`. `succeeded` rows must have non-empty costs,
+  headline metrics, regime metrics, baseline metrics, and label-scramble
+  metrics at both the repository and database boundaries.
+- `insufficient_data` is a terminal no-claim status. Runtime writers must set
   `label_scramble_pass = false` for insufficient-data rows and put deterministic
   insufficiency details in JSON metadata such as `parameters` or `metrics`.
-
-Current contract gap: the shipped schema provides JSON object columns for
-baselines, regime metrics, label-scramble metrics, and cost assumptions, but it
-does not enforce non-empty baseline/regime/label-scramble payloads for a
-`succeeded` backtest at the database level. Runtime repositories and tests must
-enforce those accepted-claim requirements; stronger database enforcement needs a
-follow-up Safety Review/migration decision instead of an in-place edit to
-migration 004.
 
 For a clean local Postgres database, prefer the single bootstrap command:
 
