@@ -20,15 +20,30 @@ SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
+from silver.analytics import (  # noqa: E402
+    BacktestMetadataRepository,
+    BacktestRunCreate,
+    BacktestRunFinish,
+    ModelRunCreate,
+    ModelRunFinish,
+)
+from silver.backtest.label_scramble import (  # noqa: E402
+    LabelScrambleInputError,
+    LabelScrambleSample,
+    run_label_scramble,
+)
 from silver.backtest.momentum_falsifier import (  # noqa: E402
     DEFAULT_MIN_TRAIN_SESSIONS,
     DEFAULT_ROUND_TRIP_COST_BPS,
     DEFAULT_STEP_SESSIONS,
     DEFAULT_TEST_SESSIONS,
+    MomentumDateResult,
     MomentumBacktestRow,
+    MomentumFalsifierResult,
     MomentumFalsifierInputError,
     run_momentum_falsifier,
 )
+from silver.backtest.regimes import summarize_by_regime  # noqa: E402
 from silver.features.momentum_12_1 import MOMENTUM_12_1_DEFINITION  # noqa: E402
 from silver.reference.seed_data import (  # noqa: E402
     DEFAULT_CONFIG_PATH as DEFAULT_REFERENCE_CONFIG_PATH,
@@ -59,6 +74,10 @@ TARGET_COMMAND_TEMPLATE = (
     "python scripts/run_falsifier.py --strategy {strategy} --horizon {horizon} "
     "--universe {universe}"
 )
+DEFAULT_LABEL_SCRAMBLE_SEED = 44
+DEFAULT_LABEL_SCRAMBLE_TRIAL_COUNT = 100
+LABEL_SCRAMBLE_ALPHA = 0.05
+MULTIPLE_COMPARISONS_CORRECTION = "none"
 
 
 class FalsifierCliError(RuntimeError):
@@ -78,7 +97,17 @@ class PersistedFalsifierInputs:
     universe_members: tuple[UniverseMember, ...]
     feature_definition: FeatureDefinitionRecord
     rows: tuple[MomentumBacktestRow, ...]
+    target_kind: str
     available_at_policy_versions: Mapping[str, int]
+
+
+@dataclass(frozen=True, slots=True)
+class FalsifierRunDates:
+    training_start_date: date
+    training_end_date: date
+    test_start_date: date
+    test_end_date: date
+    source: str
 
 
 class PsqlJsonClient:
@@ -222,18 +251,41 @@ def run_report(args: argparse.Namespace) -> None:
         horizon=args.horizon,
         universe=args.universe,
     )
-    result = run_momentum_falsifier(
-        persisted_inputs.rows,
-        calendar=calendar,
-        horizon_sessions=args.horizon,
-        min_train_sessions=DEFAULT_MIN_TRAIN_SESSIONS,
-        test_sessions=DEFAULT_TEST_SESSIONS,
-        step_sessions=DEFAULT_STEP_SESSIONS,
-        round_trip_cost_bps=DEFAULT_ROUND_TRIP_COST_BPS,
-    )
     feature = persisted_inputs.feature_definition
     feature_set_hash = _feature_set_hash(feature)
     git_sha = _git_sha()
+    input_fingerprint = fingerprint_momentum_inputs(persisted_inputs.rows)
+    try:
+        result = run_momentum_falsifier(
+            persisted_inputs.rows,
+            calendar=calendar,
+            horizon_sessions=args.horizon,
+            min_train_sessions=DEFAULT_MIN_TRAIN_SESSIONS,
+            test_sessions=DEFAULT_TEST_SESSIONS,
+            step_sessions=DEFAULT_STEP_SESSIONS,
+            round_trip_cost_bps=DEFAULT_ROUND_TRIP_COST_BPS,
+        )
+    except Exception as exc:
+        _persist_falsifier_metadata(
+            args,
+            persisted_inputs=persisted_inputs,
+            feature_set_hash=feature_set_hash,
+            git_sha=git_sha,
+            input_fingerprint=input_fingerprint,
+            result=None,
+            failure_message=str(exc),
+        )
+        raise
+
+    run_identity = _persist_falsifier_metadata(
+        args,
+        persisted_inputs=persisted_inputs,
+        feature_set_hash=feature_set_hash,
+        git_sha=git_sha,
+        input_fingerprint=input_fingerprint,
+        result=result,
+        failure_message=None,
+    )
     report = FalsifierReport(
         strategy=args.strategy,
         horizon=args.horizon,
@@ -250,15 +302,10 @@ def run_report(args: argparse.Namespace) -> None:
         reproducibility=FalsifierReproducibilityMetadata(
             command=_target_command(args),
             git_sha=git_sha,
-            input_fingerprint=fingerprint_momentum_inputs(persisted_inputs.rows),
+            input_fingerprint=input_fingerprint,
             available_at_policy_versions=persisted_inputs.available_at_policy_versions,
-            run_identity=_load_run_identity(
-                client,
-                horizon=args.horizon,
-                universe=args.universe,
-                feature_set_hash=feature_set_hash,
-                status=result.status,
-            ),
+            run_identity=run_identity,
+            random_seed=DEFAULT_LABEL_SCRAMBLE_SEED,
         ),
     )
     write_report(args.output_path, render_week_1_momentum_report(report))
@@ -289,6 +336,12 @@ def load_persisted_inputs(
     if missing_message is not None:
         raise FalsifierCliError(missing_message)
 
+    target_kind = _load_target_kind(
+        client,
+        feature_definition_id=feature_definition.id,
+        horizon=horizon,
+        universe=universe,
+    )
     rows = _load_backtest_rows(
         client,
         feature_definition_id=feature_definition.id,
@@ -299,6 +352,7 @@ def load_persisted_inputs(
         universe_members=universe_members,
         feature_definition=feature_definition,
         rows=rows,
+        target_kind=target_kind,
         available_at_policy_versions=_load_policy_versions(client),
     )
 
@@ -307,6 +361,460 @@ def write_report(path: Path, content: str) -> None:
     report_path = _resolve_repo_path(path)
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text(content, encoding="utf-8")
+
+
+def _persist_falsifier_metadata(
+    args: argparse.Namespace,
+    *,
+    persisted_inputs: PersistedFalsifierInputs,
+    feature_set_hash: str,
+    git_sha: str,
+    input_fingerprint: str,
+    result: MomentumFalsifierResult | None,
+    failure_message: str | None,
+) -> FalsifierRunIdentity:
+    status = "failed" if result is None else result.status
+    dates = _run_dates(result, persisted_inputs.rows)
+    parameters = _metadata_parameters(
+        args,
+        persisted_inputs=persisted_inputs,
+        dates=dates,
+        result=result,
+        failure_message=failure_message,
+    )
+    cost_assumptions = _cost_assumptions(result)
+    metrics = _metrics_payload(result=result, failure_message=failure_message)
+    label_scramble_metrics, label_scramble_pass = _label_scramble_payload(
+        rows=persisted_inputs.rows,
+        result=result,
+    )
+    model_run_key = _metadata_key(
+        "model",
+        args=args,
+        git_sha=git_sha,
+        feature_set_hash=feature_set_hash,
+        input_fingerprint=input_fingerprint,
+        target_kind=persisted_inputs.target_kind,
+    )
+    backtest_run_key = _metadata_key(
+        "backtest",
+        args=args,
+        git_sha=git_sha,
+        feature_set_hash=feature_set_hash,
+        input_fingerprint=input_fingerprint,
+        target_kind=persisted_inputs.target_kind,
+    )
+
+    connection = _connect_metadata(args.database_url)
+    try:
+        repository = BacktestMetadataRepository(connection)
+        model_run = repository.create_model_run(
+            ModelRunCreate(
+                model_run_key=model_run_key,
+                name=f"{args.strategy} falsifier model",
+                code_git_sha=git_sha,
+                feature_set_hash=feature_set_hash,
+                feature_snapshot_ref=None,
+                training_start_date=dates.training_start_date,
+                training_end_date=dates.training_end_date,
+                test_start_date=dates.test_start_date,
+                test_end_date=dates.test_end_date,
+                horizon_days=args.horizon,
+                target_kind=persisted_inputs.target_kind,
+                random_seed=DEFAULT_LABEL_SCRAMBLE_SEED,
+                cost_assumptions=cost_assumptions,
+                parameters={**parameters, "metadata_role": "model_run"},
+                available_at_policy_versions=(
+                    persisted_inputs.available_at_policy_versions
+                ),
+                input_fingerprints={
+                    "momentum_inputs": input_fingerprint,
+                    "feature_definition_hash": (
+                        persisted_inputs.feature_definition.definition_hash
+                    ),
+                },
+            )
+        )
+        backtest_run = repository.create_backtest_run(
+            BacktestRunCreate(
+                backtest_run_key=backtest_run_key,
+                model_run_id=model_run.id,
+                name=f"{args.strategy} falsifier backtest",
+                universe_name=args.universe,
+                horizon_days=args.horizon,
+                target_kind=persisted_inputs.target_kind,
+                cost_assumptions=cost_assumptions,
+                parameters={**parameters, "metadata_role": "backtest_run"},
+                multiple_comparisons_correction=MULTIPLE_COMPARISONS_CORRECTION,
+            )
+        )
+        if model_run.status == "running":
+            model_run = repository.finish_model_run(
+                model_run.id,
+                ModelRunFinish(status=status, metrics=metrics),
+            )
+        if backtest_run.status == "running":
+            backtest_run = repository.finish_backtest_run(
+                backtest_run.id,
+                BacktestRunFinish(
+                    status=status,
+                    cost_assumptions=cost_assumptions,
+                    metrics=metrics,
+                    metrics_by_regime=_metrics_by_regime(result),
+                    baseline_metrics=_baseline_metrics(result),
+                    label_scramble_metrics=label_scramble_metrics,
+                    label_scramble_pass=label_scramble_pass,
+                    multiple_comparisons_correction=MULTIPLE_COMPARISONS_CORRECTION,
+                ),
+            )
+        _commit(connection)
+    except Exception as exc:
+        _rollback(connection)
+        detail = str(exc)
+        if args.database_url:
+            detail = detail.replace(args.database_url, "[DATABASE_URL]")
+        raise FalsifierCliError(
+            f"failed to write falsifier run metadata: {detail}"
+        ) from exc
+    finally:
+        _close(connection)
+
+    return FalsifierRunIdentity(
+        model_run_id=model_run.id,
+        model_run_key=model_run.model_run_key,
+        backtest_run_id=backtest_run.id,
+        backtest_run_key=backtest_run.backtest_run_key,
+    )
+
+
+def _connect_metadata(database_url: str) -> object:
+    try:
+        import psycopg
+    except ImportError as exc:
+        raise FalsifierCliError(
+            "psycopg is required to write falsifier run metadata; "
+            "install the project dependencies first"
+        ) from exc
+    return psycopg.connect(database_url)
+
+
+def _commit(connection: object) -> None:
+    commit = getattr(connection, "commit", None)
+    if commit is not None:
+        commit()
+
+
+def _rollback(connection: object) -> None:
+    rollback = getattr(connection, "rollback", None)
+    if rollback is not None:
+        rollback()
+
+
+def _close(connection: object) -> None:
+    close = getattr(connection, "close", None)
+    if close is not None:
+        close()
+
+
+def _run_dates(
+    result: MomentumFalsifierResult | None,
+    rows: Sequence[MomentumBacktestRow],
+) -> FalsifierRunDates:
+    if result is not None and result.windows:
+        first = result.windows[0]
+        last = result.windows[-1]
+        return FalsifierRunDates(
+            training_start_date=first.train_start,
+            training_end_date=first.train_end,
+            test_start_date=first.test_start,
+            test_end_date=last.test_end,
+            source="walk_forward_windows",
+        )
+
+    coverage = coverage_from_rows(rows)
+    if coverage.asof_start is None or coverage.horizon_start is None:
+        raise FalsifierCliError(
+            "cannot create falsifier run metadata without dated input rows"
+        )
+    training_start = coverage.asof_start
+    training_end = coverage.asof_start
+    test_start = coverage.asof_end or coverage.horizon_start
+    if test_start <= training_end:
+        test_start = coverage.horizon_start
+    if test_start <= training_end:
+        raise FalsifierCliError(
+            "cannot derive non-overlapping model/test metadata dates from "
+            "falsifier input rows"
+        )
+    test_end = max(
+        date_value
+        for date_value in (coverage.asof_end, coverage.horizon_end, test_start)
+        if date_value is not None
+    )
+    if test_end < test_start:
+        test_end = test_start
+    return FalsifierRunDates(
+        training_start_date=training_start,
+        training_end_date=training_end,
+        test_start_date=test_start,
+        test_end_date=test_end,
+        source="input_coverage_fallback",
+    )
+
+
+def _metadata_parameters(
+    args: argparse.Namespace,
+    *,
+    persisted_inputs: PersistedFalsifierInputs,
+    dates: FalsifierRunDates,
+    result: MomentumFalsifierResult | None,
+    failure_message: str | None,
+) -> dict[str, object]:
+    parameters: dict[str, object] = {
+        "strategy": args.strategy,
+        "universe": args.universe,
+        "horizon_days": args.horizon,
+        "target_kind": persisted_inputs.target_kind,
+        "command": _target_command(args),
+        "feature_definition_id": persisted_inputs.feature_definition.id,
+        "feature_name": persisted_inputs.feature_definition.name,
+        "feature_version": persisted_inputs.feature_definition.version,
+        "metadata_date_source": dates.source,
+        "multiple_comparisons_correction": MULTIPLE_COMPARISONS_CORRECTION,
+        "label_scramble_seed": DEFAULT_LABEL_SCRAMBLE_SEED,
+        "label_scramble_trial_count": DEFAULT_LABEL_SCRAMBLE_TRIAL_COUNT,
+        "label_scramble_alpha": LABEL_SCRAMBLE_ALPHA,
+    }
+    if result is None:
+        parameters.update(
+            {
+                "status": "failed",
+                "failure_message": failure_message,
+                "min_train_sessions": DEFAULT_MIN_TRAIN_SESSIONS,
+                "test_sessions": DEFAULT_TEST_SESSIONS,
+                "step_sessions": DEFAULT_STEP_SESSIONS,
+            }
+        )
+        return parameters
+
+    parameters.update(
+        {
+            "status": result.status,
+            "min_train_sessions": result.min_train_sessions,
+            "test_sessions": result.test_sessions,
+            "step_sessions": result.step_sessions,
+            "walk_forward_window_count": len(result.windows),
+            "failure_modes": list(result.failure_modes),
+        }
+    )
+    return parameters
+
+
+def _metadata_key(
+    role: str,
+    *,
+    args: argparse.Namespace,
+    git_sha: str,
+    feature_set_hash: str,
+    input_fingerprint: str,
+    target_kind: str,
+) -> str:
+    payload = {
+        "command": _target_command(args),
+        "feature_set_hash": feature_set_hash,
+        "git_sha": git_sha,
+        "horizon": args.horizon,
+        "input_fingerprint": input_fingerprint,
+        "role": role,
+        "target_kind": target_kind,
+        "universe": args.universe,
+        "version": 1,
+    }
+    digest = hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    return f"falsifier-{role}-{args.strategy}-h{args.horizon}-{digest[:16]}"
+
+
+def _cost_assumptions(result: MomentumFalsifierResult | None) -> dict[str, object]:
+    round_trip_cost_bps = (
+        DEFAULT_ROUND_TRIP_COST_BPS
+        if result is None
+        else result.round_trip_cost_bps
+    )
+    return {
+        "round_trip_cost_bps": round_trip_cost_bps,
+        "application": (
+            "Subtracted from strategy and equal-weight baseline returns for "
+            "each scored test date."
+        ),
+    }
+
+
+def _metrics_payload(
+    *,
+    result: MomentumFalsifierResult | None,
+    failure_message: str | None,
+) -> dict[str, object]:
+    if result is None:
+        return {
+            "status": "failed",
+            "failure_message": failure_message,
+        }
+
+    metrics = result.headline_metrics
+    return {
+        "status": result.status,
+        "failure_modes": list(result.failure_modes),
+        "scored_walk_forward_windows": metrics.split_count,
+        "scored_test_dates": metrics.scored_test_dates,
+        "eligible_observations": metrics.eligible_observations,
+        "selected_observations": metrics.selected_observations,
+        "mean_strategy_gross_horizon_return": (
+            metrics.mean_strategy_gross_return
+        ),
+        "mean_strategy_net_horizon_return": metrics.mean_strategy_net_return,
+        "strategy_net_hit_rate": metrics.strategy_net_hit_rate,
+        "strategy_net_return_stddev": metrics.strategy_net_return_stddev,
+        "strategy_net_return_to_stddev": metrics.strategy_net_return_to_stddev,
+    }
+
+
+def _baseline_metrics(
+    result: MomentumFalsifierResult | None,
+) -> dict[str, object]:
+    if result is None:
+        return {
+            "status": "not_available",
+            "reason": "falsifier execution failed before baseline metrics existed",
+        }
+
+    metrics = result.headline_metrics
+    return {
+        "equal_weight_universe": {
+            "mean_gross_horizon_return": metrics.mean_baseline_gross_return,
+            "mean_net_horizon_return": metrics.mean_baseline_net_return,
+        },
+        "strategy_vs_equal_weight_universe": {
+            "mean_net_difference": metrics.mean_net_difference_vs_baseline,
+        },
+    }
+
+
+def _metrics_by_regime(
+    result: MomentumFalsifierResult | None,
+) -> dict[str, object]:
+    if result is None:
+        return {
+            "status": "not_available",
+            "reason": "falsifier execution failed before regime metrics existed",
+        }
+
+    date_results = _date_results(result)
+    strategy_summaries = summarize_by_regime(
+        date_results,
+        date_getter=lambda row: row.asof_date,
+        value_getter=lambda row: row.strategy_net_return,
+    )
+    baseline_summaries = summarize_by_regime(
+        date_results,
+        date_getter=lambda row: row.asof_date,
+        value_getter=lambda row: row.baseline_net_return,
+    )
+    diff_summaries = summarize_by_regime(
+        date_results,
+        date_getter=lambda row: row.asof_date,
+        value_getter=lambda row: row.strategy_net_return - row.baseline_net_return,
+    )
+    baseline_by_name = {summary.regime_name: summary for summary in baseline_summaries}
+    diff_by_name = {summary.regime_name: summary for summary in diff_summaries}
+    return {
+        summary.regime_name: {
+            "start_date": summary.start_date.isoformat(),
+            "end_date": summary.end_date.isoformat(),
+            "sample_count": summary.sample_count,
+            "strategy_net_return": _regime_summary(summary),
+            "baseline_net_return": _regime_summary(
+                baseline_by_name[summary.regime_name]
+            ),
+            "net_difference_vs_baseline": _regime_summary(
+                diff_by_name[summary.regime_name]
+            ),
+        }
+        for summary in strategy_summaries
+    }
+
+
+def _regime_summary(summary: object) -> dict[str, object]:
+    return {
+        "value_count": summary.value_count,
+        "mean": summary.mean,
+        "sample_stddev": summary.sample_stddev,
+        "minimum": summary.minimum,
+        "maximum": summary.maximum,
+        "hit_rate": summary.hit_rate,
+    }
+
+
+def _label_scramble_payload(
+    *,
+    rows: Sequence[MomentumBacktestRow],
+    result: MomentumFalsifierResult | None,
+) -> tuple[dict[str, object], bool]:
+    if result is None:
+        return (
+            {
+                "status": "not_run",
+                "reason": "falsifier execution failed before label scramble",
+            },
+            False,
+        )
+    try:
+        scramble_result = run_label_scramble(
+            _label_scramble_samples(rows),
+            seed=DEFAULT_LABEL_SCRAMBLE_SEED,
+            trial_count=DEFAULT_LABEL_SCRAMBLE_TRIAL_COUNT,
+        )
+    except LabelScrambleInputError as exc:
+        return (
+            {
+                "status": "not_run",
+                "reason": str(exc),
+                "seed": DEFAULT_LABEL_SCRAMBLE_SEED,
+                "trial_count": DEFAULT_LABEL_SCRAMBLE_TRIAL_COUNT,
+            },
+            False,
+        )
+
+    payload = scramble_result.to_dict()
+    payload["status"] = "completed"
+    payload["alpha"] = LABEL_SCRAMBLE_ALPHA
+    return (
+        payload,
+        result.status == "succeeded" and scramble_result.p_value <= LABEL_SCRAMBLE_ALPHA,
+    )
+
+
+def _label_scramble_samples(
+    rows: Sequence[MomentumBacktestRow],
+) -> tuple[LabelScrambleSample, ...]:
+    return tuple(
+        LabelScrambleSample(
+            sample_id=f"{row.ticker}-{row.asof_date.isoformat()}",
+            feature_value=row.feature_value,
+            label_value=row.realized_return,
+            group_key=row.asof_date.isoformat(),
+        )
+        for row in rows
+    )
+
+
+def _date_results(result: MomentumFalsifierResult) -> tuple[MomentumDateResult, ...]:
+    return tuple(
+        date_result
+        for window in result.windows
+        for date_result in window.date_results
+    )
 
 
 def _load_universe_members(
@@ -420,6 +928,52 @@ SELECT jsonb_build_object(
         feature_values=_required_int(rows, "feature_values"),
         labels=_required_int(rows, "labels"),
         joined_rows=_required_int(rows, "joined_rows"),
+    )
+
+
+def _load_target_kind(
+    client: PsqlJsonClient,
+    *,
+    feature_definition_id: int,
+    horizon: int,
+    universe: str,
+) -> str:
+    rows = client.fetch_json(
+        f"""
+WITH joined_rows AS (
+    SELECT frl.realized_excess_return
+    FROM silver.feature_values fv
+    JOIN silver.forward_return_labels frl
+      ON frl.security_id = fv.security_id
+     AND frl.label_date = fv.asof_date
+     AND frl.horizon_days = {horizon}
+    JOIN silver.universe_membership um
+      ON um.security_id = fv.security_id
+     AND um.universe_name = {_sql_literal(universe)}
+     AND fv.asof_date >= um.valid_from
+     AND (um.valid_to IS NULL OR fv.asof_date <= um.valid_to)
+    WHERE fv.feature_definition_id = {feature_definition_id}
+)
+SELECT jsonb_build_object(
+    'total_rows', count(*),
+    'excess_rows', count(realized_excess_return),
+    'raw_rows', count(*) FILTER (WHERE realized_excess_return IS NULL)
+)::text
+FROM joined_rows;
+""".strip()
+    )
+    total_rows = _required_int(rows, "total_rows")
+    excess_rows = _required_int(rows, "excess_rows")
+    raw_rows = _required_int(rows, "raw_rows")
+    if total_rows == 0:
+        raise FalsifierCliError("cannot determine target kind without joined rows")
+    if raw_rows == total_rows:
+        return "raw_return"
+    if excess_rows == total_rows:
+        return "excess_return_market"
+    raise FalsifierCliError(
+        "persisted falsifier rows mix raw-return and benchmark-relative labels; "
+        "materialize labels consistently before writing run metadata"
     )
 
 
