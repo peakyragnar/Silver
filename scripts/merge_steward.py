@@ -642,15 +642,16 @@ def decide_issue_action(
     if safety_trigger is not None:
         return Decision("move_safety_review", safety_trigger, pr.number)
 
+    merge_state = (pr.merge_state_status or "UNKNOWN").upper()
+    if merge_state == "DIRTY":
+        return Decision("move_rework", "PR has merge conflicts", pr.number)
+
     check_status = required_check_status(pr, required_checks)
     if check_status.action == "move_rework":
         return Decision("move_rework", check_status.reason, pr.number)
     if check_status.action == "wait":
         return Decision("wait", check_status.reason, pr.number)
 
-    merge_state = (pr.merge_state_status or "UNKNOWN").upper()
-    if merge_state == "DIRTY":
-        return Decision("move_rework", "PR has merge conflicts", pr.number)
     if merge_state in {"BLOCKED", "UNKNOWN"}:
         return Decision("wait", f"PR merge state is {merge_state}", pr.number)
     if pr.in_merge_queue:
