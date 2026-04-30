@@ -516,6 +516,18 @@ Done when:
 - Changed files can be compared against `owns`, `do_not_touch`, and
   `contracts_touched`.
 
+Current Silver MVP:
+
+- `scripts/vcs_reconciler.py` reads GitHub PR state, matches PRs to ledger
+  tickets, records PR URL and branch evidence, and updates ledger states.
+- The MVP routes merged PRs to `Done`, safe green open PRs to `Merging`,
+  conflicts and failed required checks to `Rework`, and safety exceptions to
+  `Safety Review`.
+- `scripts/integration_steward.py` turns `Rework` tickets into repair packets
+  with PR URL, branch, blocker, allowed scope, protected paths, validation, and
+  proof refresh requirements.
+- It does not perform automatic branch editing yet.
+
 ### Stage 7: Integration Steward MVP
 
 Outcome:
@@ -526,13 +538,13 @@ Deliverables:
 
 - Detect stale branches.
 - Detect routine conflicts.
-- Run an agentic integration lane for bounded repair.
+- Write bounded repair packets for agentic integration workers.
 - Re-run required validation.
 - Return unresolved semantic or safety exceptions to Safety Review.
 
 Done when:
 
-- Simple rebase/conflict repair is handled by the system.
+- Simple rebase/conflict repair has a concrete system-owned repair packet.
 - Michael sees only exceptions that require human judgment.
 
 ### Stage 8: Safety Gate Hardening
@@ -585,8 +597,8 @@ The first practical slice should be small:
 6. Update proof packet requirements.
 7. Add tests for contract-first fanout and integration gating.
 
-This slice does not build full automatic conflict repair yet. It makes the work
-graph real first.
+This slice does not build full automatic branch editing yet. It makes the work
+graph and repair lane real first.
 
 Current Silver MVP paths:
 
@@ -595,9 +607,11 @@ Current Silver MVP paths:
 | Objective ticket metadata parsing | `scripts/planning_steward.py` |
 | Local ledger DAG metadata and admission gates | `scripts/work_ledger.py` |
 | Linear mirror metadata surface | `scripts/linear_mirror.py` |
+| VCS PR reconciliation and routing | `scripts/vcs_reconciler.py` |
+| Integration repair packets | `scripts/integration_steward.py` |
 | Objective template | `docs/objectives/TEMPLATE.md` |
 | Silver operation policy | `docs/Symphony-Operation.md` |
-| Focused tests | `tests/test_planning_steward.py`, `tests/test_work_ledger.py`, `tests/test_linear_mirror.py` |
+| Focused tests | `tests/test_planning_steward.py`, `tests/test_work_ledger.py`, `tests/test_linear_mirror.py`, `tests/test_vcs_reconciler.py`, `tests/test_integration_steward.py` |
 
 ## Defer For Now
 

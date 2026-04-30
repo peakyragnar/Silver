@@ -182,6 +182,26 @@ Apply the mirror after preview:
 python scripts/linear_mirror.py --apply
 ```
 
+Reconcile post-Symphony PR state back into the ledger:
+
+```text
+python scripts/vcs_reconciler.py
+python scripts/vcs_reconciler.py --apply
+python scripts/integration_steward.py
+python scripts/integration_steward.py --apply
+```
+
+Then preview and apply the Linear mirror again so the visible board follows the
+ledger. The reconciler is conservative: it records PR URL and branch evidence,
+marks merged PRs `Done`, moves green open PRs to `Merging`, sends conflicts or
+failed required checks to `Rework`, and sends scope or safety exceptions to
+`Safety Review`. It is not an automatic code repair worker.
+
+The integration steward writes a repair packet for each `Rework` ticket. The
+packet includes PR URL, branch, blocker, allowed scope, protected paths,
+validation, and proof-packet refresh requirements. The next Linear mirror
+exposes that packet to Symphony so Rework has concrete repair instructions.
+
 Mirror mapping:
 
 | Ledger | Linear bridge |
@@ -666,6 +686,18 @@ data-retention behavior changes
 The integration steward handles routine post-Symphony repair in Objective
 context. It covers stale branches, failed merge queue attempts, merge conflicts,
 simple wiring drift between related tickets, and proof-packet refreshes.
+
+Current MVP:
+
+```text
+scripts/vcs_reconciler.py
+scripts/integration_steward.py
+```
+
+The MVP is detection, routing, and repair-packet creation. It reads GitHub PR
+state through the VCS adapter, matches PRs to ledger tickets, records branch/PR
+evidence, updates ledger status, and writes the bounded instructions a repair
+worker needs. Full automatic branch editing comes after this lane is proven.
 
 Mechanical conflicts may be repaired automatically:
 

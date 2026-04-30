@@ -102,6 +102,9 @@ class LedgerMirrorTicket:
     conflict_zones: tuple[str, ...]
     validation: tuple[str, ...]
     proof_packet: tuple[str, ...]
+    branch: str | None
+    pr_url: str | None
+    latest_steward_event: str | None
     linear_identifier: str | None
 
 
@@ -532,8 +535,22 @@ def apply_mirror_action(
 def mirror_tickets(connection: sqlite3.Connection) -> tuple[LedgerMirrorTicket, ...]:
     rows = connection.execute(
         """
-        SELECT * FROM tickets
-        ORDER BY objective_id, sequence
+        SELECT
+          tickets.*,
+          (
+            SELECT message
+            FROM ticket_events
+            WHERE ticket_events.ticket_id = tickets.id
+              AND ticket_events.actor IN (
+                'integration_steward',
+                'vcs_reconciler',
+                'merge_steward'
+              )
+            ORDER BY ticket_events.id DESC
+            LIMIT 1
+          ) AS latest_steward_event
+        FROM tickets
+        ORDER BY tickets.objective_id, tickets.sequence
         """
     ).fetchall()
     return tuple(row_to_mirror_ticket(row) for row in rows)
@@ -560,6 +577,9 @@ def row_to_mirror_ticket(row: sqlite3.Row) -> LedgerMirrorTicket:
         conflict_zones=tuple(work_ledger.loads_json(row["conflict_zones_json"])),
         validation=tuple(work_ledger.loads_json(row["validation_json"])),
         proof_packet=tuple(work_ledger.loads_json(row["proof_packet_json"])),
+        branch=row["branch"],
+        pr_url=row["pr_url"],
+        latest_steward_event=row["latest_steward_event"],
         linear_identifier=row["linear_identifier"],
     )
 
@@ -689,6 +709,8 @@ def linear_description(ticket: LedgerMirrorTicket) -> str:
         f"Dependency Group: {ticket.dependency_group}",
         f"Contracts Touched: {', '.join(ticket.contracts_touched) or 'none'}",
         f"Risk Class: {ticket.risk_class}",
+        f"PR URL: {ticket.pr_url or 'none'}",
+        f"Branch: {ticket.branch or 'none'}",
         "",
         "Purpose:",
         ticket.purpose,
@@ -720,6 +742,14 @@ def linear_description(ticket: LedgerMirrorTicket) -> str:
         "Proof Packet Requirements:",
         *bullet_lines(ticket.proof_packet),
     ]
+    if ticket.latest_steward_event:
+        lines.extend(
+            [
+                "",
+                "Latest Steward Event:",
+                ticket.latest_steward_event,
+            ]
+        )
     return "\n".join(lines).strip() + "\n"
 
 

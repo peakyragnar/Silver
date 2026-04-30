@@ -86,6 +86,8 @@ def test_apply_creates_linear_issues_and_records_mirror_state(
     assert "Dependency Group:" in description
     assert "Contracts Touched:" in description
     assert "Risk Class:" in description
+    assert "PR URL:" in description
+    assert "Branch:" in description
     assert "Objective Impact:" in description
 
 
@@ -230,6 +232,46 @@ def test_description_compare_accepts_linear_markdown_readback() -> None:
     )
 
     assert linear_mirror.descriptions_match(linear_readback, expected)
+
+
+def test_description_includes_pr_evidence_and_latest_steward_event(
+    tmp_path: Path,
+) -> None:
+    ledger_path = _seed_ledger(tmp_path)
+    with work_ledger.connect_existing(ledger_path) as connection:
+        now = work_ledger.utc_now()
+        connection.execute(
+            """
+            UPDATE tickets
+            SET status = 'Rework',
+                branch = 'arr-55-traceability',
+                pr_url = 'https://github.com/SilverEnv/Silver/pull/60',
+                updated_at = ?
+            WHERE id = 'local-runtime-ledger-001'
+            """,
+            (now,),
+        )
+        work_ledger.insert_event(
+            connection,
+            ticket_id="local-runtime-ledger-001",
+            objective_id="local-runtime-ledger",
+            event_type="integration_repair_requested",
+            from_status="Rework",
+            to_status="Rework",
+            message="Repair PR #60: resolve merge conflicts and rerun tests.",
+            actor="integration_steward",
+            created_at=now,
+        )
+        ticket = {
+            item.id: item for item in linear_mirror.mirror_tickets(connection)
+        }["local-runtime-ledger-001"]
+
+    description = linear_mirror.linear_description(ticket)
+
+    assert "PR URL: https://github.com/SilverEnv/Silver/pull/60" in description
+    assert "Branch: arr-55-traceability" in description
+    assert "Latest Steward Event:" in description
+    assert "resolve merge conflicts" in description
 
 
 def test_check_mode_avoids_network_and_ledger_reads(tmp_path: Path, capsys) -> None:

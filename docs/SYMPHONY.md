@@ -120,6 +120,29 @@ Apply those visible-board changes only when the preview is correct:
 python scripts/linear_mirror.py --apply
 ```
 
+After Symphony opens or lands PRs, reconcile GitHub state back into the local
+ledger before mirroring again:
+
+```bash
+python scripts/vcs_reconciler.py
+python scripts/vcs_reconciler.py --apply
+python scripts/integration_steward.py
+python scripts/integration_steward.py --apply
+python scripts/linear_mirror.py
+python scripts/linear_mirror.py --apply
+```
+
+The VCS reconciler matches PRs by `Ledger Ticket: ...`, `ticket_id: ...`,
+Linear identifier, or ledger ticket ID in PR identity fields. It records PR URL
+and branch evidence, marks merged PRs `Done`, moves safe green open PRs to
+`Merging`, routes failed checks or conflicts to `Rework`, and routes scope or
+safety exceptions to `Safety Review`. It does not repair code yet.
+
+The integration steward turns `Rework` into a repair packet. It records the PR,
+branch, blocker, allowed scope, protected paths, validation, and proof refresh
+requirements in the ledger. The Linear mirror surfaces that packet so a
+Symphony repair worker can act without Michael restating context.
+
 By default the ledger lives at:
 
 ```bash
