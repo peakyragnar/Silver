@@ -63,6 +63,11 @@ def test_propose_plan_returns_objective_packets_with_ticket_impacts(
     assert "persistence layer" in first_ticket.objective_impact
     assert first_ticket.technical_summary
     assert "db/migrations/" in first_ticket.do_not_touch
+    assert first_ticket.ticket_role == "implementation"
+    assert first_ticket.dependency_group == "default"
+    assert first_ticket.contracts_touched == ()
+    assert first_ticket.risk_class == ""
+    assert first_ticket.proof_packet == ()
 
 
 def test_markdown_output_is_user_readable_and_propose_only(tmp_path: Path) -> None:
@@ -73,6 +78,7 @@ def test_markdown_output_is_user_readable_and_propose_only(tmp_path: Path) -> No
 
     assert "# Planning Steward Proposal" in output
     assert "No Linear, GitHub, database, or vendor writes were performed." in output
+    assert "Ticket Role:" in output
     assert "Objective Impact:" in output
     assert "Migration Lane" in output
     assert "Source: repo heuristic" in output
@@ -96,7 +102,13 @@ def test_json_output_contains_stable_objective_shape(tmp_path: Path) -> None:
         "path": None,
         "type": "repo_heuristic",
     }
-    assert "objective_impact" in payload["objectives"][0]["expected_tickets"][0]
+    first_ticket = payload["objectives"][0]["expected_tickets"][0]
+    assert "objective_impact" in first_ticket
+    assert first_ticket["ticket_role"] == "implementation"
+    assert first_ticket["dependency_group"] == "default"
+    assert first_ticket["contracts_touched"] == []
+    assert first_ticket["risk_class"] == ""
+    assert first_ticket["proof_packet"] == []
 
 
 def test_active_objective_file_produces_source_backed_ticket_proposal(
@@ -110,6 +122,11 @@ def test_active_objective_file_produces_source_backed_ticket_proposal(
             [
                 "- Teach steward to read active Objectives",
                 "  without losing wrapped titles",
+                "  Ticket Role: implementation",
+                "  Dependency Group: orchestration-core",
+                "  Contracts Touched:",
+                "  - objective-compiler",
+                "  Risk Class: low",
                 "  Purpose: Parse approved Objective markdown before heuristics.",
                 "  Objective Impact: Michael-approved Objective files become the planning source of truth.",
                 "  Technical Summary: Add deterministic markdown parsing for active Objective files.",
@@ -124,6 +141,8 @@ def test_active_objective_file_produces_source_backed_ticket_proposal(
                 "  - scripts/planning_steward.py",
                 "  Validation:",
                 "  - python -m pytest tests/test_planning_steward.py",
+                "  Proof Packet:",
+                "  - PR link and validation output",
             ]
         ),
     )
@@ -138,6 +157,10 @@ def test_active_objective_file_produces_source_backed_ticket_proposal(
     assert ticket.title == (
         "Teach steward to read active Objectives without losing wrapped titles"
     )
+    assert ticket.ticket_role == "implementation"
+    assert ticket.dependency_group == "orchestration-core"
+    assert ticket.contracts_touched == ("objective-compiler",)
+    assert ticket.risk_class == "low"
     assert ticket.objective_impact == (
         "Michael-approved Objective files become the planning source of truth."
     )
@@ -154,6 +177,7 @@ def test_active_objective_file_produces_source_backed_ticket_proposal(
     assert ticket.validation == (
         "python -m pytest tests/test_planning_steward.py",
     )
+    assert ticket.proof_packet == ("PR link and validation output",)
 
 
 def test_json_output_contains_objective_file_source_metadata(tmp_path: Path) -> None:

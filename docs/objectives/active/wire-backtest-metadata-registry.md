@@ -46,15 +46,188 @@ Guardrails:
 - Do not commit `.env`, API keys, vendor secrets, or local credentials.
 
 Expected Tickets:
-- Confirm the metadata registry contract across `SPEC.md`, architecture docs,
-  and migration ownership.
-- Add or complete the model/backtest run schema for durable metadata.
-- Wire walk-forward or falsifier runners to create `model_runs` records.
-- Wire backtest result writing to create `backtest_runs` records with costs,
-  baselines, metrics, and metadata.
-- Surface reproducibility metadata in falsifier reports.
-- Add replay or traceability validation from a reported result to its
-  `model_run_id`.
+- Confirm the metadata registry contract
+  Ticket Role: contract
+  Dependency Group: backtest-metadata-registry
+  Contracts Touched:
+  - backtest-run-registry
+  Risk Class: semantic
+  Purpose: Align `SPEC.md`, architecture docs, and migration ownership before
+  implementation starts.
+  Expected Impact On Objective: Dependent tickets build against one accepted
+  model/backtest run contract instead of inventing registry shape independently.
+  Technical Summary: Review the existing metadata schema, document the durable
+  fields, and identify whether a schema owner ticket is actually required.
+  Owns:
+  - `SPEC.md`
+  - `docs/ARCHITECTURE.md`
+  - `docs/TESTING.md`
+  Do Not Touch:
+  - `scripts/run_falsifier.py`
+  - `src/silver/features/`
+  Dependencies:
+  - none
+  Conflict Zones:
+  - `SPEC.md`
+  - `docs/ARCHITECTURE.md`
+  - `docs/TESTING.md`
+  Validation:
+  - `git diff --check`
+  Proof Packet:
+  - accepted registry field list
+  - explicit statement on whether a migration is required
+- Add or complete durable metadata schema
+  Ticket Role: contract
+  Dependency Group: backtest-metadata-registry
+  Contracts Touched:
+  - backtest-run-registry
+  Risk Class: migration
+  Purpose: Create or adjust durable `model_runs` and `backtest_runs` metadata
+  storage only if the contract ticket proves the existing schema is insufficient.
+  Expected Impact On Objective: The Objective gets a stable database contract
+  before runner and report tickets write reproducibility records.
+  Technical Summary: Add the minimal migration or schema documentation needed
+  for code SHA, feature set hash, training window, seed, assumptions, PIT policy
+  versions, universe, horizon, costs, baselines, metrics, and run metadata.
+  Owns:
+  - `db/migrations/`
+  - `tests/test_migrations.py`
+  Do Not Touch:
+  - `scripts/run_falsifier.py`
+  - `src/silver/features/`
+  Dependencies:
+  - Confirm the metadata registry contract
+  Conflict Zones:
+  - `db/migrations/`
+  - `tests/`
+  Validation:
+  - `python scripts/apply_migrations.py --check`
+  - `python -m pytest tests/test_migrations.py`
+  Proof Packet:
+  - migration number or no-migration justification
+  - schema validation output
+- Wire runners to create `model_runs`
+  Ticket Role: implementation
+  Dependency Group: backtest-metadata-registry
+  Contracts Touched:
+  - backtest-run-registry
+  Risk Class: semantic
+  Purpose: Make walk-forward or falsifier runners create durable model run
+  records before reporting results.
+  Expected Impact On Objective: Each reported backtest can identify the frozen
+  model/run input identity used to produce it.
+  Technical Summary: Update runner code to compute deterministic model-run
+  identity from code SHA, features, training window, seed, execution
+  assumptions, and PIT policy versions.
+  Owns:
+  - `scripts/run_falsifier.py`
+  - `src/silver/backtest/`
+  - `src/silver/models/`
+  Do Not Touch:
+  - `db/migrations/`
+  - `src/silver/features/`
+  Dependencies:
+  - Confirm the metadata registry contract
+  - Add or complete durable metadata schema
+  Conflict Zones:
+  - `scripts/run_falsifier.py`
+  - `src/silver/backtest/`
+  - `src/silver/models/`
+  Validation:
+  - `python scripts/run_falsifier.py --check`
+  - `python -m pytest`
+  Proof Packet:
+  - sample `model_run` identity
+  - validation command output
+- Wire result writing to create `backtest_runs`
+  Ticket Role: implementation
+  Dependency Group: backtest-metadata-registry
+  Contracts Touched:
+  - backtest-run-registry
+  Risk Class: semantic
+  Purpose: Persist `backtest_runs` records with costs, baselines, metrics, and
+  reproducibility metadata.
+  Expected Impact On Objective: The accepted backtest claim can be traced from
+  report output to durable run metadata.
+  Technical Summary: Attach backtest run writes to the existing result path and
+  ensure reruns use deterministic keys for identical inputs.
+  Owns:
+  - `scripts/run_falsifier.py`
+  - `src/silver/backtest/`
+  - `tests/`
+  Do Not Touch:
+  - `db/migrations/`
+  Dependencies:
+  - Wire runners to create `model_runs`
+  Conflict Zones:
+  - `scripts/run_falsifier.py`
+  - `src/silver/backtest/`
+  - `tests/`
+  Validation:
+  - `python scripts/run_falsifier.py --check`
+  - `python -m pytest`
+  Proof Packet:
+  - sample `backtest_run` identity
+  - deterministic rerun evidence
+- Surface reproducibility metadata in falsifier reports
+  Ticket Role: integration
+  Dependency Group: backtest-metadata-registry
+  Contracts Touched:
+  - backtest-run-registry
+  - falsifier-report
+  Risk Class: semantic
+  Purpose: Show registry-backed reproducibility metadata in the user-facing
+  falsifier report.
+  Expected Impact On Objective: Michael can review a report and see the exact
+  durable identity needed to replay or reject the result.
+  Technical Summary: Update report rendering to include model/backtest run
+  identity, frozen inputs, costs, baselines, and required falsifier evidence.
+  Owns:
+  - `src/silver/reports/falsifier.py`
+  - `reports/falsifier/`
+  - `tests/`
+  Do Not Touch:
+  - `db/migrations/`
+  Dependencies:
+  - Wire result writing to create `backtest_runs`
+  Conflict Zones:
+  - `src/silver/reports/`
+  - `reports/falsifier/`
+  Validation:
+  - `python -m pytest tests/test_falsifier_report.py`
+  - `python scripts/run_falsifier.py --check`
+  Proof Packet:
+  - rendered report path
+  - metadata fields visible in report
+- Add replay or traceability validation
+  Ticket Role: validation
+  Dependency Group: backtest-metadata-registry
+  Contracts Touched:
+  - backtest-run-registry
+  Risk Class: semantic
+  Purpose: Prove a reported result can be traced back to the same frozen
+  metadata inputs.
+  Expected Impact On Objective: The Objective is complete only when the
+  reproducibility promise can be checked end to end.
+  Technical Summary: Add focused tests or a check path that starts with report
+  metadata and verifies the matching persisted model/backtest run identity.
+  Owns:
+  - `tests/`
+  - `scripts/`
+  Do Not Touch:
+  - `db/migrations/`
+  Dependencies:
+  - Surface reproducibility metadata in falsifier reports
+  Conflict Zones:
+  - `tests/`
+  - `scripts/run_falsifier.py`
+  Validation:
+  - `git diff --check`
+  - `python -m pytest`
+  - `ruff check .`
+  - `python scripts/run_falsifier.py --strategy momentum_12_1 --horizon 63 --universe falsifier_seed`
+  Proof Packet:
+  - traceability evidence from report to run registry
 
 Validation:
 - `git diff --check`

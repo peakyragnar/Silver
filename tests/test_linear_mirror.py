@@ -80,19 +80,28 @@ def test_apply_creates_linear_issues_and_records_mirror_state(
         ("local-runtime-ledger-002", "Backlog"),
     ]
     assert len(client.created) == 2
-    assert "Ledger Ticket: local-runtime-ledger-001" in client.created[0]["description"]
-    assert "Objective Impact:" in client.created[0]["description"]
+    description = client.created[0]["description"]
+    assert "Ledger Ticket: local-runtime-ledger-001" in description
+    assert "Ticket Role:" in description
+    assert "Dependency Group:" in description
+    assert "Contracts Touched:" in description
+    assert "Risk Class:" in description
+    assert "Objective Impact:" in description
 
 
 def test_existing_issue_state_updates_from_ledger_status(tmp_path: Path) -> None:
     ledger_path = _seed_ledger(tmp_path)
+    current_description = _linear_description(
+        ledger_path,
+        "local-runtime-ledger-001",
+    )
     client = _FakeLinearClient(
         issues=(
             linear_mirror.LinearIssue(
                 id="issue-1",
                 identifier="ARR-1",
                 title="Existing",
-                description="Ledger Ticket: local-runtime-ledger-001\n",
+                description=current_description,
                 state="Backlog",
                 team_id="team-1",
             ),
@@ -122,6 +131,42 @@ def test_existing_issue_state_updates_from_ledger_status(tmp_path: Path) -> None
 
 def test_current_existing_issue_is_noop(tmp_path: Path) -> None:
     ledger_path = _seed_ledger(tmp_path)
+    current_description = _linear_description(
+        ledger_path,
+        "local-runtime-ledger-001",
+    )
+    client = _FakeLinearClient(
+        issues=(
+            linear_mirror.LinearIssue(
+                id="issue-1",
+                identifier="ARR-1",
+                title="Existing",
+                description=current_description,
+                state="Todo",
+                team_id="team-1",
+            ),
+        )
+    )
+
+    with work_ledger.connect_existing(ledger_path) as connection:
+        actions = linear_mirror.mirror_once(
+            connection=connection,
+            client=client,
+            project="silver",
+            team_id=None,
+            limit=100,
+            apply=False,
+        )
+
+    assert actions[0].action == "noop"
+    assert actions[0].linear_issue is not None
+    assert actions[0].linear_issue.identifier == "ARR-1"
+
+
+def test_existing_issue_description_updates_when_metadata_is_missing(
+    tmp_path: Path,
+) -> None:
+    ledger_path = _seed_ledger(tmp_path)
     client = _FakeLinearClient(
         issues=(
             linear_mirror.LinearIssue(
@@ -142,12 +187,15 @@ def test_current_existing_issue_is_noop(tmp_path: Path) -> None:
             project="silver",
             team_id=None,
             limit=100,
-            apply=False,
+            apply=True,
         )
 
-    assert actions[0].action == "noop"
-    assert actions[0].linear_issue is not None
-    assert actions[0].linear_issue.identifier == "ARR-1"
+    assert actions[0].action == "update_description"
+    assert client.updated_descriptions
+    issue_id, description = client.updated_descriptions[0]
+    assert issue_id == "issue-1"
+    assert "Ticket Role:" in description
+    assert "Contracts Touched:" in description
 
 
 def test_check_mode_avoids_network_and_ledger_reads(tmp_path: Path, capsys) -> None:
@@ -184,6 +232,15 @@ def _seed_ledger(tmp_path: Path) -> Path:
             message="ready for mirror",
         )
     return ledger_path
+
+
+def _linear_description(ledger_path: Path, ticket_id: str) -> str:
+    with work_ledger.connect_existing(ledger_path) as connection:
+        tickets = {
+            ticket.id: ticket
+            for ticket in linear_mirror.mirror_tickets(connection)
+        }
+    return linear_mirror.linear_description(tickets[ticket_id])
 
 
 def _write_repo_with_objective(root: Path) -> Path:
@@ -266,6 +323,7 @@ class _FakeLinearClient:
         self.issues = list(issues)
         self.created: list[dict[str, str]] = []
         self.updated: list[tuple[str, str]] = []
+        self.updated_descriptions: list[tuple[str, str]] = []
 
     def project_snapshot(self, project: str, *, limit: int):
         assert project == "silver"
@@ -335,3 +393,6 @@ class _FakeLinearClient:
 
     def update_issue_state(self, issue_id: str, state_id: str) -> None:
         self.updated.append((issue_id, state_id))
+
+    def update_issue_description(self, issue_id: str, description: str) -> None:
+        self.updated_descriptions.append((issue_id, description))
