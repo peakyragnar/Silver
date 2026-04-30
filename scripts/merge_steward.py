@@ -902,6 +902,13 @@ def planned_objective_safety_allowance(
     contract_allowance = planned_contract_safety_allowance(issue, pr, safety_trigger)
     if contract_allowance is not None:
         return contract_allowance
+    security_allowance = planned_contract_security_hardening_allowance(
+        issue,
+        pr,
+        safety_trigger,
+    )
+    if security_allowance is not None:
+        return security_allowance
     return planned_semantic_safety_allowance(issue, pr, safety_trigger)
 
 
@@ -943,6 +950,53 @@ def planned_contract_safety_allowance(
 
     return (
         "planned contract docs-only PIT clarification in ticket-owned paths "
+        f"(original trigger: {safety_trigger})"
+    )
+
+
+def planned_contract_security_hardening_allowance(
+    issue: LinearIssue,
+    pr: PullRequest,
+    safety_trigger: str,
+) -> str | None:
+    if issue_ticket_role(issue.description) != "contract":
+        return None
+    if not safety_trigger.startswith("secret handling change:"):
+        return None
+    if "PR metadata" in safety_trigger:
+        return None
+
+    changed_files = tuple(pr.changed_files)
+    if not changed_files:
+        return None
+    paths = tuple(
+        normalized
+        for changed_file in changed_files
+        if (normalized := _normalize_path(changed_file.path))
+    )
+    if not paths or not all(_is_docs_artifact_path(path) for path in paths):
+        return None
+    if not any(_is_secret_handling_path(path) for path in paths):
+        return None
+    if any(changed_file.deletions != 0 for changed_file in changed_files):
+        return None
+
+    owns = issue_section_paths(issue.description, "Owns")
+    if not owns or not all(_path_is_covered(path, owns) for path in paths):
+        return None
+
+    do_not_touch = issue_section_paths(issue.description, "Do Not Touch")
+    if any(_path_is_covered(path, do_not_touch) for path in paths):
+        return None
+
+    diff = pr.diff or ""
+    if secret_relaxation_signal(diff):
+        return None
+    if not secret_hardening_signal(diff):
+        return None
+
+    return (
+        "planned contract docs-only security hardening in ticket-owned paths "
         f"(original trigger: {safety_trigger})"
     )
 
@@ -1043,6 +1097,82 @@ def pit_relaxation_signal(diff: str) -> bool:
             r"\b(available_at|point-in-time|pit|asof_date|lookahead)\b",
             r"\b(available_at|point-in-time|pit|asof_date|lookahead)\b.{0,80}"
             r"\b(optional|not required|no longer required|may be ignored)\b",
+        ),
+    )
+
+
+def secret_hardening_signal(diff: str) -> bool:
+    return any(
+        _line_hardens_secret_handling(line)
+        for line in _added_diff_text(diff).splitlines()
+    )
+
+
+def secret_relaxation_signal(diff: str) -> bool:
+    for line in _added_diff_text(diff).splitlines():
+        if not _line_mentions_secret(line):
+            continue
+        if _matches_any(
+            line,
+            (
+                r"\b(redact|mask|scrub|omit|exclude|strip)\b.{0,50}"
+                r"\b(optional|not required|no longer required|disabled|bypass)\b",
+                r"\b(optional|not required|no longer required|disabled|bypass)\b"
+                r".{0,50}\b(redact|mask|scrub|omit|exclude|strip)\b",
+                r"\b(no longer|need not|do not need to)\b.{0,80}"
+                r"\b(redact|mask|scrub|omit|exclude|strip)\b",
+            ),
+        ):
+            return True
+        if _matches_any(
+            line,
+            (
+                r"\b(may|can|allow|allowed|optional)\b.{0,80}"
+                r"\b(copy|copied|expose|exposed|log|logged|store|stored|"
+                r"persist|persisted|write|written|commit|committed)\b",
+                r"\b(copy|copied|expose|exposed|log|logged|store|stored|"
+                r"persist|persisted|write|written|commit|committed)\b.{0,80}"
+                r"\b(may|can|allow|allowed|optional)\b",
+                r"\b(copy|copied|expose|exposed|log|logged|store|stored|"
+                r"persist|persisted|write|written|commit|committed)\b.{0,80}"
+                r"\b(secret|credential|api[_ -]?keys?|token)\b",
+            ),
+        ):
+            return True
+        if _line_hardens_secret_handling(line):
+            continue
+    return False
+
+
+def _line_mentions_secret(line: str) -> bool:
+    return _matches_any(
+        line,
+        (
+            r"\b(secret|credential|api[_ -]?keys?|token)\b",
+            r"\b(linear_api_key|fmp_api_key)\b",
+        ),
+    )
+
+
+def _line_hardens_secret_handling(line: str) -> bool:
+    if not _line_mentions_secret(line):
+        return False
+    return _matches_any(
+        line,
+        (
+            r"\b(redact|redacted|mask|masked|scrub|scrubbed|omit|omitted|"
+            r"exclude|excluded|remove|removed|strip|stripped)\b.{0,80}"
+            r"\b(secret|credential|api[_ -]?keys?|token|linear_api_key|fmp_api_key)\b",
+            r"\b(secret|credential|api[_ -]?keys?|token|linear_api_key|fmp_api_key)"
+            r"\b.{0,80}\b(redact|redacted|mask|masked|scrub|scrubbed|omit|"
+            r"omitted|exclude|excluded|remove|removed|strip|stripped)\b",
+            r"\b(do not|does not|must not|never|without|no)\b.{0,80}"
+            r"\b(log|store|persist|write|commit|expose|copy)\b.{0,80}"
+            r"\b(secret|credential|api[_ -]?keys?|token|linear_api_key|fmp_api_key)\b",
+            r"\b(secret|credential|api[_ -]?keys?|token|linear_api_key|fmp_api_key)"
+            r"\b.{0,80}"
+            r"\b(do not|does not|must not|never|without|no)\b.{0,80}"
+            r"\b(log|store|persist|write|commit|expose|copy)\b",
         ),
     )
 

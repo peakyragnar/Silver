@@ -283,6 +283,75 @@ def test_planned_contract_docs_only_pit_change_queues() -> None:
     assert "green" in decision.reason
 
 
+def test_planned_contract_docs_only_security_hardening_queues() -> None:
+    issue = _issue(
+        "ARR-62",
+        description=(
+            "Parent Objective: raw-vault-failed-fmp-responses\n"
+            "Ticket Role: contract\n\n"
+            "Owns:\n"
+            "- `docs/SECURITY.md`\n"
+            "- `docs/ARCHITECTURE.md`\n\n"
+            "Do Not Touch:\n"
+            "- `.env`\n"
+            "- `src/silver/sources/fmp/client.py`\n"
+        ),
+    )
+    pr = _pr(
+        76,
+        title="ARR-62 Define failed FMP raw-vault audit contract",
+        changed_files=_changed_files("docs/SECURITY.md", "docs/ARCHITECTURE.md"),
+        diff=(
+            "diff --git a/docs/SECURITY.md b/docs/SECURITY.md\n"
+            "+++ b/docs/SECURITY.md\n"
+            "+FMP raw-vault request metadata must redact API keys before persistence.\n"
+            "diff --git a/docs/ARCHITECTURE.md b/docs/ARCHITECTURE.md\n"
+            "+++ b/docs/ARCHITECTURE.md\n"
+            "+Failed vendor responses are persisted before parsing or raising.\n"
+        ),
+    )
+
+    decision = merge_steward.decide_issue_action(
+        issue,
+        pr,
+        ("Python 3.10 checks",),
+    )
+
+    assert decision.action == "queue"
+    assert "planned contract docs-only security hardening" in decision.reason
+    assert "green" in decision.reason
+
+
+def test_planned_contract_security_doc_relaxation_still_requires_review() -> None:
+    issue = _issue(
+        "ARR-62",
+        description=(
+            "Ticket Role: contract\n\n"
+            "Owns:\n"
+            "- `docs/SECURITY.md`\n"
+        ),
+    )
+    pr = _pr(
+        76,
+        title="ARR-62 Define failed FMP raw-vault audit contract",
+        changed_files=_changed_files("docs/SECURITY.md"),
+        diff=(
+            "diff --git a/docs/SECURITY.md b/docs/SECURITY.md\n"
+            "+++ b/docs/SECURITY.md\n"
+            "+FMP_API_KEY may be copied into local test fixtures if redacted.\n"
+        ),
+    )
+
+    decision = merge_steward.decide_issue_action(
+        issue,
+        pr,
+        ("Python 3.10 checks",),
+    )
+
+    assert decision.action == "move_safety_review"
+    assert "secret handling" in decision.reason
+
+
 def test_contract_pit_doc_deletion_still_requires_safety_review() -> None:
     issue = _issue(
         "ARR-56",

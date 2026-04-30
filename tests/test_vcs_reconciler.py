@@ -239,6 +239,54 @@ def test_planned_contract_docs_only_pit_change_can_move_to_merging(
     assert ticket.status == "Merging"
 
 
+def test_planned_contract_docs_only_security_hardening_can_move_to_merging(
+    tmp_path: Path,
+) -> None:
+    connection = _ledger_connection(tmp_path)
+    _insert_ticket(
+        connection,
+        ticket_id="raw-vault-failed-fmp-responses-001",
+        status="Safety Review",
+        linear_identifier="ARR-62",
+        ticket_role="contract",
+        owns=("docs/SECURITY.md", "docs/ARCHITECTURE.md"),
+        do_not_touch=(".env", "src/silver/sources/fmp/client.py"),
+    )
+
+    actions = vcs_reconciler.reconcile_prs(
+        connection,
+        (
+            _pr(
+                76,
+                title="ARR-62 Define failed FMP raw-vault audit contract",
+                changed_files=_changed_files(
+                    "docs/SECURITY.md",
+                    "docs/ARCHITECTURE.md",
+                ),
+                diff=(
+                    "diff --git a/docs/SECURITY.md b/docs/SECURITY.md\n"
+                    "+++ b/docs/SECURITY.md\n"
+                    "+FMP raw-vault request metadata must redact API keys before persistence.\n"
+                    "diff --git a/docs/ARCHITECTURE.md b/docs/ARCHITECTURE.md\n"
+                    "+++ b/docs/ARCHITECTURE.md\n"
+                    "+Failed vendor responses are persisted before parsing or raising.\n"
+                ),
+            ),
+        ),
+        required_checks=("Python 3.10 checks",),
+        apply=True,
+    )
+
+    ticket = work_ledger.select_ticket(
+        connection,
+        "raw-vault-failed-fmp-responses-001",
+    )
+
+    assert [action.action for action in actions] == ["move_merging"]
+    assert "planned contract docs-only security hardening" in actions[0].reason
+    assert ticket.status == "Merging"
+
+
 def test_pit_doc_change_with_deletions_still_requires_safety_review(
     tmp_path: Path,
 ) -> None:
