@@ -11,6 +11,7 @@ import pytest
 from silver.analytics import (
     BacktestMetadataError,
     BacktestMetadataRepository,
+    compare_backtest_replay_snapshots,
     BacktestRunCreate,
     BacktestRunFinish,
     AnalyticsRunRepository,
@@ -219,6 +220,87 @@ def test_traceability_snapshot_is_replay_contract_from_backtest_run_id() -> None
     assert snapshot.backtest_universe_name == "falsifier_seed"
     assert snapshot.backtest_multiple_comparisons_correction == "bh"
     assert snapshot.backtest_label_scramble_pass is True
+
+
+def test_replay_snapshot_resolves_accepted_backtest_claim_by_id_or_key() -> None:
+    connection = FakeMetadataConnection()
+    repository = BacktestMetadataRepository(connection)
+
+    model = repository.create_model_run(_model_run_create())
+    backtest = repository.create_backtest_run(_backtest_run_create(model_run_id=model.id))
+    repository.finish_model_run(
+        model.id,
+        ModelRunFinish(status="succeeded", metrics={"split_count": 3}),
+    )
+    repository.finish_backtest_run(backtest.id, _backtest_run_finish())
+
+    by_id = repository.load_backtest_replay_snapshot(backtest_run_id=backtest.id)
+    by_key = repository.load_backtest_replay_snapshot(
+        backtest_run_key=backtest.backtest_run_key,
+    )
+
+    assert by_id == by_key
+    assert by_key.backtest_run_key == "backtest-run-1"
+    assert by_key.model_run_key == "model-run-1"
+    assert connection.executed[-2][1] == {"backtest_run_id": backtest.id}
+    assert connection.executed[-1][1] == {"backtest_run_key": backtest.backtest_run_key}
+
+
+def test_replay_snapshot_requires_exactly_one_backtest_identity() -> None:
+    repository = BacktestMetadataRepository(FakeMetadataConnection())
+
+    with pytest.raises(BacktestMetadataError, match="exactly one backtest identity"):
+        repository.load_backtest_replay_snapshot()
+
+    with pytest.raises(BacktestMetadataError, match="exactly one backtest identity"):
+        repository.load_backtest_replay_snapshot(
+            backtest_run_id=1,
+            backtest_run_key="backtest-run-1",
+        )
+
+
+def test_model_run_replay_metadata_resolves_by_id_or_key() -> None:
+    connection = FakeMetadataConnection()
+    repository = BacktestMetadataRepository(connection)
+
+    model = repository.create_model_run(_model_run_create())
+    repository.finish_model_run(
+        model.id,
+        ModelRunFinish(status="succeeded", metrics={"split_count": 3}),
+    )
+
+    by_id = repository.load_model_run_replay_metadata(model_run_id=model.id)
+    by_key = repository.load_model_run_replay_metadata(model_run_key=model.model_run_key)
+
+    assert by_id == by_key
+    assert by_key.model_run_id == model.id
+    assert by_key.model_run_key == "model-run-1"
+    assert by_key.status == "succeeded"
+    assert by_key.feature_set_hash == "a" * 64
+    assert by_key.input_fingerprints == {"universe": "falsifier_seed"}
+
+
+def test_backtest_replay_comparison_names_drifted_identity_field() -> None:
+    connection = FakeMetadataConnection()
+    repository = BacktestMetadataRepository(connection)
+    model = repository.create_model_run(_model_run_create())
+    backtest = repository.create_backtest_run(_backtest_run_create(model_run_id=model.id))
+    repository.finish_model_run(
+        model.id,
+        ModelRunFinish(status="succeeded", metrics={"split_count": 3}),
+    )
+    repository.finish_backtest_run(backtest.id, _backtest_run_finish())
+
+    stored = repository.load_backtest_replay_snapshot(backtest_run_id=backtest.id)
+    drifted = replace(stored, model_available_at_policy_versions={"daily_price": 2})
+
+    comparison = compare_backtest_replay_snapshots(stored, drifted)
+
+    assert not comparison.matches
+    assert comparison.mismatches == (
+        "model_runs.available_at_policy_versions expected {\"daily_price\":1} "
+        "got {\"daily_price\":2}",
+    )
 
 
 def test_traceability_snapshot_rejects_missing_backtest_run_id() -> None:
@@ -608,6 +690,9 @@ class FakeMetadataCursor:
         if sql.startswith("SELECT\n    id,\n    model_run_key"):
             self._one = self.connection.model_runs.get(params["model_run_key"])
             return
+        if sql.startswith("SELECT\n    id AS model_run_id"):
+            self._one = self._model_run_replay_metadata(params)
+            return
         if sql.startswith("UPDATE silver.model_runs"):
             self._finish_model_run(params)
             return
@@ -621,7 +706,7 @@ class FakeMetadataCursor:
             self._finish_backtest_run(params)
             return
         if sql.startswith("SELECT\n    mr.id AS model_run_id"):
-            self._one = self._traceability_snapshot(params["backtest_run_id"])
+            self._one = self._traceability_snapshot(params)
             return
         raise AssertionError(f"unexpected SQL: {sql}")
 
@@ -740,9 +825,41 @@ class FakeMetadataCursor:
                 return
         self._one = None
 
-    def _traceability_snapshot(self, backtest_run_id: int) -> dict[str, Any] | None:
+    def _model_run_replay_metadata(self, params: dict[str, Any]) -> dict[str, Any] | None:
+        for model in self.connection.model_runs.values():
+            if params.get("model_run_id") not in {None, model["id"]}:
+                continue
+            if params.get("model_run_key") not in {None, model["model_run_key"]}:
+                continue
+            return {
+                "model_run_id": model["id"],
+                "model_run_key": model["model_run_key"],
+                "status": model["status"],
+                "code_git_sha": model["code_git_sha"],
+                "feature_set_hash": model["feature_set_hash"],
+                "feature_snapshot_ref": model["feature_snapshot_ref"],
+                "training_start_date": model["training_start_date"],
+                "training_end_date": model["training_end_date"],
+                "test_start_date": model["test_start_date"],
+                "test_end_date": model["test_end_date"],
+                "horizon_days": model["horizon_days"],
+                "target_kind": model["target_kind"],
+                "random_seed": model["random_seed"],
+                "cost_assumptions": model["cost_assumptions"],
+                "metrics": model["metrics"],
+                "parameters": model["parameters"],
+                "available_at_policy_versions": model[
+                    "available_at_policy_versions"
+                ],
+                "input_fingerprints": model["input_fingerprints"],
+            }
+        return None
+
+    def _traceability_snapshot(self, params: dict[str, Any]) -> dict[str, Any] | None:
         for backtest in self.connection.backtest_runs.values():
-            if backtest["id"] != backtest_run_id:
+            if params.get("backtest_run_id") not in {None, backtest["id"]}:
+                continue
+            if params.get("backtest_run_key") not in {None, backtest["backtest_run_key"]}:
                 continue
             model = next(
                 row

@@ -146,6 +146,73 @@ class BacktestTraceabilitySnapshot:
     backtest_multiple_comparisons_correction: str | None
 
 
+@dataclass(frozen=True, slots=True)
+class ModelRunReplayMetadata:
+    """Replay-critical metadata loaded directly from ``silver.model_runs``."""
+
+    model_run_id: int
+    model_run_key: str
+    status: str
+    code_git_sha: str
+    feature_set_hash: str
+    feature_snapshot_ref: str | None
+    training_start_date: date
+    training_end_date: date
+    test_start_date: date
+    test_end_date: date
+    horizon_days: int
+    target_kind: str
+    random_seed: int
+    cost_assumptions: Mapping[str, Any]
+    metrics: Mapping[str, Any]
+    parameters: Mapping[str, Any]
+    available_at_policy_versions: Mapping[str, Any]
+    input_fingerprints: Mapping[str, Any]
+
+
+@dataclass(frozen=True, slots=True)
+class BacktestReplayComparison:
+    """Field-level comparison of stored and replayed backtest claim metadata."""
+
+    stored_backtest_run_id: int
+    stored_backtest_run_key: str
+    replayed_backtest_run_id: int
+    replayed_backtest_run_key: str
+    mismatches: tuple[str, ...]
+
+    @property
+    def matches(self) -> bool:
+        """Return whether every replay-critical field matched."""
+        return not self.mismatches
+
+
+def compare_backtest_replay_snapshots(
+    stored: BacktestTraceabilitySnapshot,
+    replayed: BacktestTraceabilitySnapshot,
+) -> BacktestReplayComparison:
+    """Compare replay-critical model/backtest metadata field by field."""
+    if not isinstance(stored, BacktestTraceabilitySnapshot):
+        raise BacktestMetadataError("stored must be a BacktestTraceabilitySnapshot")
+    if not isinstance(replayed, BacktestTraceabilitySnapshot):
+        raise BacktestMetadataError("replayed must be a BacktestTraceabilitySnapshot")
+
+    mismatches: list[str] = []
+    for field_name, attribute in _REPLAY_SNAPSHOT_COMPARISON_FIELDS:
+        _expect_replay_value(
+            mismatches,
+            field_name,
+            expected=getattr(stored, attribute),
+            actual=getattr(replayed, attribute),
+        )
+    return BacktestReplayComparison(
+        stored_backtest_run_id=stored.backtest_run_id,
+        stored_backtest_run_key=stored.backtest_run_key,
+        replayed_backtest_run_id=replayed.backtest_run_id,
+        replayed_backtest_run_key=replayed.backtest_run_key,
+        mismatches=tuple(mismatches),
+    )
+
+
 class AnalyticsRunRepository:
     """Write and finish rows in ``silver.analytics_runs``."""
 
@@ -282,21 +349,90 @@ class BacktestMetadataRepository:
         backtest_run_id: int,
     ) -> BacktestTraceabilitySnapshot:
         """Load the joined model/backtest metadata for a reported backtest run."""
-        params = {
-            "backtest_run_id": _metadata_positive_int(
-                backtest_run_id,
-                "backtest_run_id",
-            ),
-        }
+        normalized_id = _metadata_positive_int(backtest_run_id, "backtest_run_id")
+        try:
+            return self.load_backtest_replay_snapshot(backtest_run_id=normalized_id)
+        except BacktestMetadataError as exc:
+            if "replay metadata was not found" not in str(exc):
+                raise
+            raise BacktestMetadataError(
+                f"backtest run {normalized_id} traceability metadata was not found"
+            ) from exc
+
+    def load_model_run_replay_metadata(
+        self,
+        *,
+        model_run_id: int | None = None,
+        model_run_key: str | None = None,
+    ) -> ModelRunReplayMetadata:
+        """Load replay-critical ``model_runs`` metadata by durable id or key."""
+        if (model_run_id is None) == (model_run_key is None):
+            raise BacktestMetadataError("exactly one model identity must be supplied")
+
+        if model_run_id is not None:
+            params = {
+                "model_run_id": _metadata_positive_int(
+                    model_run_id,
+                    "model_run_id",
+                ),
+            }
+            sql = _SELECT_MODEL_REPLAY_BY_ID_SQL
+            missing = f"model_run_id {params['model_run_id']}"
+        else:
+            params = {
+                "model_run_key": _metadata_label(
+                    model_run_key,
+                    "model_run_key",
+                ),
+            }
+            sql = _SELECT_MODEL_REPLAY_BY_KEY_SQL
+            missing = f"model_run_key {params['model_run_key']}"
+
         with _cursor(self._connection) as cursor:
-            cursor.execute(_SELECT_BACKTEST_TRACEABILITY_SQL, params)
+            cursor.execute(sql, params)
             row = cursor.fetchone()
         if row is None:
+            raise BacktestMetadataError(f"{missing} replay metadata was not found")
+        return _model_run_replay_metadata(row)
+
+    def load_backtest_replay_snapshot(
+        self,
+        *,
+        backtest_run_id: int | None = None,
+        backtest_run_key: str | None = None,
+    ) -> BacktestTraceabilitySnapshot:
+        """Load joined replay metadata for an accepted backtest claim candidate."""
+        if (backtest_run_id is None) == (backtest_run_key is None):
             raise BacktestMetadataError(
-                f"backtest run {params['backtest_run_id']} traceability metadata "
-                "was not found"
+                "exactly one backtest identity must be supplied"
             )
+
+        if backtest_run_id is not None:
+            params = {
+                "backtest_run_id": _metadata_positive_int(
+                    backtest_run_id,
+                    "backtest_run_id",
+                ),
+            }
+            sql = _SELECT_BACKTEST_TRACEABILITY_BY_ID_SQL
+            missing = f"backtest_run_id {params['backtest_run_id']}"
+        else:
+            params = {
+                "backtest_run_key": _metadata_label(
+                    backtest_run_key,
+                    "backtest_run_key",
+                ),
+            }
+            sql = _SELECT_BACKTEST_TRACEABILITY_BY_KEY_SQL
+            missing = f"backtest_run_key {params['backtest_run_key']}"
+
+        with _cursor(self._connection) as cursor:
+            cursor.execute(sql, params)
+            row = cursor.fetchone()
+        if row is None:
+            raise BacktestMetadataError(f"{missing} replay metadata was not found")
         return _backtest_traceability_snapshot(row)
+
 
     def _load_model_run_by_key(self, model_run_key: str) -> object:
         with _cursor(self._connection) as cursor:
@@ -775,6 +911,109 @@ def _backtest_traceability_snapshot(row: object) -> BacktestTraceabilitySnapshot
     )
 
 
+def _model_run_replay_metadata(row: object) -> ModelRunReplayMetadata:
+    return ModelRunReplayMetadata(
+        model_run_id=_metadata_row_int(row, "model_run_id", 0, "model_runs.id"),
+        model_run_key=_metadata_row_str(
+            row,
+            "model_run_key",
+            1,
+            "model_runs.model_run_key",
+        ),
+        status=_metadata_row_str(row, "status", 2, "model_runs.status"),
+        code_git_sha=_metadata_row_str(
+            row,
+            "code_git_sha",
+            3,
+            "model_runs.code_git_sha",
+        ),
+        feature_set_hash=_metadata_row_str(
+            row,
+            "feature_set_hash",
+            4,
+            "model_runs.feature_set_hash",
+        ),
+        feature_snapshot_ref=_metadata_row_optional_str(
+            row,
+            "feature_snapshot_ref",
+            5,
+            "model_runs.feature_snapshot_ref",
+        ),
+        training_start_date=_metadata_row_date(
+            row,
+            "training_start_date",
+            6,
+            "model_runs.training_start_date",
+        ),
+        training_end_date=_metadata_row_date(
+            row,
+            "training_end_date",
+            7,
+            "model_runs.training_end_date",
+        ),
+        test_start_date=_metadata_row_date(
+            row,
+            "test_start_date",
+            8,
+            "model_runs.test_start_date",
+        ),
+        test_end_date=_metadata_row_date(
+            row,
+            "test_end_date",
+            9,
+            "model_runs.test_end_date",
+        ),
+        horizon_days=_metadata_row_int(
+            row,
+            "horizon_days",
+            10,
+            "model_runs.horizon_days",
+        ),
+        target_kind=_metadata_row_str(
+            row,
+            "target_kind",
+            11,
+            "model_runs.target_kind",
+        ),
+        random_seed=_metadata_row_int(
+            row,
+            "random_seed",
+            12,
+            "model_runs.random_seed",
+        ),
+        cost_assumptions=_metadata_row_json_object(
+            row,
+            "cost_assumptions",
+            13,
+            "model_runs.cost_assumptions",
+        ),
+        metrics=_metadata_row_json_object(
+            row,
+            "metrics",
+            14,
+            "model_runs.metrics",
+        ),
+        parameters=_metadata_row_json_object(
+            row,
+            "parameters",
+            15,
+            "model_runs.parameters",
+        ),
+        available_at_policy_versions=_metadata_row_json_object(
+            row,
+            "available_at_policy_versions",
+            16,
+            "model_runs.available_at_policy_versions",
+        ),
+        input_fingerprints=_metadata_row_json_object(
+            row,
+            "input_fingerprints",
+            17,
+            "model_runs.input_fingerprints",
+        ),
+    )
+
+
 def _model_run_matches_create_params(row: object, params: Mapping[str, Any]) -> bool:
     return (
         _metadata_row_str(row, "name", 3, "model_runs.name") == params["name"]
@@ -1155,6 +1394,84 @@ def _row_str(row: object, key: str, index: int, name: str) -> str:
     return value.strip()
 
 
+_REPLAY_SNAPSHOT_COMPARISON_FIELDS = (
+    ("model_runs.model_run_key", "model_run_key"),
+    ("model_runs.status", "model_status"),
+    ("model_runs.code_git_sha", "model_code_git_sha"),
+    ("model_runs.feature_set_hash", "model_feature_set_hash"),
+    ("model_runs.feature_snapshot_ref", "model_feature_snapshot_ref"),
+    ("model_runs.training_start_date", "model_training_start_date"),
+    ("model_runs.training_end_date", "model_training_end_date"),
+    ("model_runs.test_start_date", "model_test_start_date"),
+    ("model_runs.test_end_date", "model_test_end_date"),
+    ("model_runs.horizon_days", "model_horizon_days"),
+    ("model_runs.target_kind", "model_target_kind"),
+    ("model_runs.random_seed", "model_random_seed"),
+    ("model_runs.cost_assumptions", "model_cost_assumptions"),
+    ("model_runs.metrics", "model_metrics"),
+    ("model_runs.parameters", "model_parameters"),
+    (
+        "model_runs.available_at_policy_versions",
+        "model_available_at_policy_versions",
+    ),
+    ("model_runs.input_fingerprints", "model_input_fingerprints"),
+    ("backtest_runs.backtest_run_key", "backtest_run_key"),
+    ("backtest_runs.model_run_id", "backtest_model_run_id"),
+    ("backtest_runs.status", "backtest_status"),
+    ("backtest_runs.universe_name", "backtest_universe_name"),
+    ("backtest_runs.horizon_days", "backtest_horizon_days"),
+    ("backtest_runs.target_kind", "backtest_target_kind"),
+    ("backtest_runs.cost_assumptions", "backtest_cost_assumptions"),
+    ("backtest_runs.parameters", "backtest_parameters"),
+    ("backtest_runs.metrics", "backtest_metrics"),
+    ("backtest_runs.metrics_by_regime", "backtest_metrics_by_regime"),
+    ("backtest_runs.baseline_metrics", "backtest_baseline_metrics"),
+    ("backtest_runs.label_scramble_metrics", "backtest_label_scramble_metrics"),
+    ("backtest_runs.label_scramble_pass", "backtest_label_scramble_pass"),
+    (
+        "backtest_runs.multiple_comparisons_correction",
+        "backtest_multiple_comparisons_correction",
+    ),
+)
+
+
+def _expect_replay_value(
+    mismatches: list[str],
+    field: str,
+    *,
+    expected: object,
+    actual: object,
+) -> None:
+    normalized_expected = _replay_normalize(expected)
+    normalized_actual = _replay_normalize(actual)
+    if normalized_actual != normalized_expected:
+        mismatches.append(
+            f"{field} expected {_replay_token(normalized_expected)} "
+            f"got {_replay_token(normalized_actual)}"
+        )
+
+
+def _replay_normalize(value: object) -> object:
+    if isinstance(value, Mapping):
+        return {
+            str(key): _replay_normalize(item)
+            for key, item in sorted(value.items(), key=lambda pair: str(pair[0]))
+        }
+    if isinstance(value, tuple):
+        return [_replay_normalize(item) for item in value]
+    if isinstance(value, list):
+        return [_replay_normalize(item) for item in value]
+    if isinstance(value, date):
+        return value.isoformat()
+    return value
+
+
+def _replay_token(value: object) -> str:
+    if isinstance(value, (Mapping, list)):
+        return json.dumps(value, sort_keys=True, separators=(",", ":"))
+    return repr(value)
+
+
 @contextmanager
 def _cursor(connection: Any) -> Any:
     cursor = connection.cursor()
@@ -1264,6 +1581,56 @@ WHERE model_run_key = %(model_run_key)s
 LIMIT 1;
 """.strip()
 
+_SELECT_MODEL_REPLAY_BY_ID_SQL = """
+SELECT
+    id AS model_run_id,
+    model_run_key,
+    status,
+    code_git_sha,
+    feature_set_hash,
+    feature_snapshot_ref,
+    training_start_date,
+    training_end_date,
+    test_start_date,
+    test_end_date,
+    horizon_days,
+    target_kind,
+    random_seed,
+    cost_assumptions,
+    metrics,
+    parameters,
+    available_at_policy_versions,
+    input_fingerprints
+FROM silver.model_runs
+WHERE id = %(model_run_id)s
+LIMIT 1;
+""".strip()
+
+_SELECT_MODEL_REPLAY_BY_KEY_SQL = """
+SELECT
+    id AS model_run_id,
+    model_run_key,
+    status,
+    code_git_sha,
+    feature_set_hash,
+    feature_snapshot_ref,
+    training_start_date,
+    training_end_date,
+    test_start_date,
+    test_end_date,
+    horizon_days,
+    target_kind,
+    random_seed,
+    cost_assumptions,
+    metrics,
+    parameters,
+    available_at_policy_versions,
+    input_fingerprints
+FROM silver.model_runs
+WHERE model_run_key = %(model_run_key)s
+LIMIT 1;
+""".strip()
+
 _FINISH_MODEL_RUN_SQL = """
 UPDATE silver.model_runs
 SET status = %(status)s,
@@ -1320,7 +1687,7 @@ WHERE backtest_run_key = %(backtest_run_key)s
 LIMIT 1;
 """.strip()
 
-_SELECT_BACKTEST_TRACEABILITY_SQL = """
+_SELECT_BACKTEST_TRACEABILITY_COLUMNS = """
 SELECT
     mr.id AS model_run_id,
     mr.model_run_key,
@@ -1357,9 +1724,23 @@ SELECT
     br.multiple_comparisons_correction AS backtest_multiple_comparisons_correction
 FROM silver.backtest_runs br
 JOIN silver.model_runs mr ON mr.id = br.model_run_id
+""".strip()
+
+_SELECT_BACKTEST_TRACEABILITY_BY_ID_SQL = (
+    _SELECT_BACKTEST_TRACEABILITY_COLUMNS
+    + """
 WHERE br.id = %(backtest_run_id)s
 LIMIT 1;
-""".strip()
+""".rstrip()
+)
+
+_SELECT_BACKTEST_TRACEABILITY_BY_KEY_SQL = (
+    _SELECT_BACKTEST_TRACEABILITY_COLUMNS
+    + """
+WHERE br.backtest_run_key = %(backtest_run_key)s
+LIMIT 1;
+""".rstrip()
+)
 
 _FINISH_BACKTEST_RUN_SQL = """
 UPDATE silver.backtest_runs

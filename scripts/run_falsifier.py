@@ -25,6 +25,7 @@ if str(SRC) not in sys.path:
 from silver.analytics import (  # noqa: E402
     AnalyticsRunRecord,
     AnalyticsRunRepository,
+    BacktestReplayComparison,
     BacktestMetadataRepository,
     BacktestRunCreate,
     BacktestRunFinish,
@@ -33,6 +34,7 @@ from silver.analytics import (  # noqa: E402
     ModelRunCreate,
     ModelRunFinish,
     ModelRunRecord,
+    compare_backtest_replay_snapshots,
 )
 from silver.backtest.label_scramble import (  # noqa: E402
     LabelScrambleInputError,
@@ -133,6 +135,27 @@ class FalsifierReportRun:
     model_run: ModelRunRecord
     backtest_run: BacktestRunRecord
     status: str
+
+
+@dataclass(frozen=True, slots=True)
+class FalsifierReplayPlan:
+    """Normalized falsifier inputs reconstructed from persisted run metadata."""
+
+    snapshot: BacktestTraceabilitySnapshot
+    model_run_id: int
+    model_run_key: str
+    backtest_run_id: int
+    backtest_run_key: str
+    strategy: str
+    universe: str
+    horizon: int
+    target_kind: str
+    feature_set_hash: str
+    input_fingerprint: str
+    available_at_policy_versions: Mapping[str, Any]
+    model_window: FalsifierModelWindow
+    cost_assumptions: Mapping[str, Any]
+    execution_assumptions: Mapping[str, Any]
 
 
 class PsqlJsonClient:
@@ -494,10 +517,270 @@ def load_persisted_inputs(
     )
 
 
+def load_falsifier_replay_plan(
+    metadata_repository: BacktestMetadataRepository,
+    *,
+    backtest_run_id: int | None = None,
+    backtest_run_key: str | None = None,
+) -> FalsifierReplayPlan:
+    """Load and normalize persisted falsifier metadata for replay."""
+    snapshot = metadata_repository.load_backtest_replay_snapshot(
+        backtest_run_id=backtest_run_id,
+        backtest_run_key=backtest_run_key,
+    )
+    _validate_accepted_replay_snapshot(snapshot)
+    return _falsifier_replay_plan(snapshot)
+
+
+def compare_falsifier_replay_snapshots(
+    stored: BacktestTraceabilitySnapshot,
+    replayed: BacktestTraceabilitySnapshot,
+) -> BacktestReplayComparison:
+    """Compare stored and replayed falsifier claim metadata."""
+    return compare_backtest_replay_snapshots(stored, replayed)
+
+
+def validate_falsifier_replay_snapshots(
+    stored: BacktestTraceabilitySnapshot,
+    replayed: BacktestTraceabilitySnapshot,
+) -> None:
+    """Raise if a replayed falsifier claim drifts from stored metadata."""
+    comparison = compare_falsifier_replay_snapshots(stored, replayed)
+    if not comparison.matches:
+        raise FalsifierCliError(
+            "falsifier replay identity validation failed: "
+            + "; ".join(comparison.mismatches)
+        )
+
+
 def write_report(path: Path, content: str) -> None:
     report_path = _resolve_repo_path(path)
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text(content, encoding="utf-8")
+
+
+def _falsifier_replay_plan(snapshot: BacktestTraceabilitySnapshot) -> FalsifierReplayPlan:
+    strategy = _replay_param_str(
+        snapshot.backtest_parameters,
+        "strategy",
+        "backtest_runs.parameters.strategy",
+    )
+    universe = snapshot.backtest_universe_name
+    target_kind = snapshot.backtest_target_kind
+    input_fingerprint = _replay_param_str(
+        snapshot.model_input_fingerprints,
+        "joined_feature_label_rows_sha256",
+        "model_runs.input_fingerprints.joined_feature_label_rows_sha256",
+    )
+    execution_assumptions = _execution_assumptions_from_snapshot(snapshot)
+
+    return FalsifierReplayPlan(
+        snapshot=snapshot,
+        model_run_id=snapshot.model_run_id,
+        model_run_key=snapshot.model_run_key,
+        backtest_run_id=snapshot.backtest_run_id,
+        backtest_run_key=snapshot.backtest_run_key,
+        strategy=strategy,
+        universe=universe,
+        horizon=snapshot.backtest_horizon_days,
+        target_kind=target_kind,
+        feature_set_hash=snapshot.model_feature_set_hash,
+        input_fingerprint=input_fingerprint,
+        available_at_policy_versions=dict(
+            snapshot.model_available_at_policy_versions,
+        ),
+        model_window=FalsifierModelWindow(
+            training_start_date=snapshot.model_training_start_date,
+            training_end_date=snapshot.model_training_end_date,
+            test_start_date=snapshot.model_test_start_date,
+            test_end_date=snapshot.model_test_end_date,
+            source=_optional_replay_param_str(
+                snapshot.model_parameters,
+                "window_source",
+                "model_runs.parameters.window_source",
+            ),
+        ),
+        cost_assumptions=dict(snapshot.backtest_cost_assumptions),
+        execution_assumptions=execution_assumptions,
+    )
+
+
+def _validate_accepted_replay_snapshot(
+    snapshot: BacktestTraceabilitySnapshot,
+) -> None:
+    mismatches: list[str] = []
+    checks = (
+        ("model_runs.status", snapshot.model_status, "succeeded"),
+        ("backtest_runs.status", snapshot.backtest_status, "succeeded"),
+        (
+            "backtest_runs.model_run_id",
+            snapshot.backtest_model_run_id,
+            snapshot.model_run_id,
+        ),
+        (
+            "model_runs.horizon_days",
+            snapshot.model_horizon_days,
+            snapshot.backtest_horizon_days,
+        ),
+        (
+            "model_runs.target_kind",
+            snapshot.model_target_kind,
+            snapshot.backtest_target_kind,
+        ),
+        (
+            "model_runs.parameters.strategy",
+            snapshot.model_parameters.get("strategy"),
+            snapshot.backtest_parameters.get("strategy"),
+        ),
+        (
+            "model_runs.parameters.universe",
+            snapshot.model_parameters.get("universe"),
+            snapshot.backtest_universe_name,
+        ),
+        (
+            "backtest_runs.parameters.universe",
+            snapshot.backtest_parameters.get("universe"),
+            snapshot.backtest_universe_name,
+        ),
+        (
+            "backtest_runs.parameters.target_kind",
+            snapshot.backtest_parameters.get("target_kind"),
+            snapshot.backtest_target_kind,
+        ),
+        (
+            "backtest_runs.parameters.model_run_key",
+            snapshot.backtest_parameters.get("model_run_key"),
+            snapshot.model_run_key,
+        ),
+        (
+            "backtest_runs.multiple_comparisons_correction",
+            snapshot.backtest_multiple_comparisons_correction,
+            snapshot.backtest_parameters.get("multiple_comparisons_correction"),
+        ),
+    )
+    for field, actual, expected in checks:
+        _expect_trace_value(mismatches, field, actual=actual, expected=expected)
+
+    _require_replay_mapping(
+        mismatches,
+        "model_runs.cost_assumptions",
+        snapshot.model_cost_assumptions,
+    )
+    _require_replay_mapping(
+        mismatches,
+        "model_runs.available_at_policy_versions",
+        snapshot.model_available_at_policy_versions,
+    )
+    if snapshot.model_feature_snapshot_ref is None:
+        _require_replay_mapping(
+            mismatches,
+            "model_runs.input_fingerprints",
+            snapshot.model_input_fingerprints,
+        )
+    _require_replay_mapping(
+        mismatches,
+        "backtest_runs.cost_assumptions",
+        snapshot.backtest_cost_assumptions,
+    )
+    _require_replay_mapping(mismatches, "backtest_runs.metrics", snapshot.backtest_metrics)
+    _require_replay_mapping(
+        mismatches,
+        "backtest_runs.metrics_by_regime",
+        snapshot.backtest_metrics_by_regime,
+    )
+    _require_replay_mapping(
+        mismatches,
+        "backtest_runs.baseline_metrics",
+        snapshot.backtest_baseline_metrics,
+    )
+    _require_replay_mapping(
+        mismatches,
+        "backtest_runs.label_scramble_metrics",
+        snapshot.backtest_label_scramble_metrics,
+    )
+    if snapshot.backtest_label_scramble_pass is None:
+        mismatches.append("backtest_runs.label_scramble_pass missing replay input")
+
+    required_params = (
+        (
+            snapshot.model_input_fingerprints,
+            "joined_feature_label_rows_sha256",
+            "model_runs.input_fingerprints.joined_feature_label_rows_sha256",
+        ),
+        (snapshot.model_parameters, "strategy", "model_runs.parameters.strategy"),
+        (
+            snapshot.model_parameters,
+            "min_train_sessions",
+            "model_runs.parameters.min_train_sessions",
+        ),
+        (
+            snapshot.model_parameters,
+            "test_sessions",
+            "model_runs.parameters.test_sessions",
+        ),
+        (
+            snapshot.model_parameters,
+            "step_sessions",
+            "model_runs.parameters.step_sessions",
+        ),
+        (snapshot.backtest_parameters, "strategy", "backtest_runs.parameters.strategy"),
+        (
+            snapshot.backtest_parameters,
+            "label_scramble_alpha",
+            "backtest_runs.parameters.label_scramble_alpha",
+        ),
+        (
+            snapshot.backtest_parameters,
+            "label_scramble_seed",
+            "backtest_runs.parameters.label_scramble_seed",
+        ),
+        (
+            snapshot.backtest_parameters,
+            "label_scramble_trial_count",
+            "backtest_runs.parameters.label_scramble_trial_count",
+        ),
+    )
+    for mapping, key, field in required_params:
+        if mapping.get(key) is None:
+            mismatches.append(f"{field} missing replay input")
+
+    if mismatches:
+        raise FalsifierCliError(
+            "falsifier replay input validation failed: " + "; ".join(mismatches)
+        )
+
+
+def _require_replay_mapping(
+    mismatches: list[str],
+    field: str,
+    value: Mapping[str, Any],
+) -> None:
+    if not value:
+        mismatches.append(f"{field} missing replay input")
+
+
+def _replay_param_str(
+    mapping: Mapping[str, Any],
+    key: str,
+    field: str,
+) -> str:
+    value = mapping.get(key)
+    if not isinstance(value, str) or not value.strip():
+        raise FalsifierCliError(f"{field} missing replay input")
+    return value.strip()
+
+
+def _optional_replay_param_str(
+    mapping: Mapping[str, Any],
+    key: str,
+    field: str,
+) -> str | None:
+    value = mapping.get(key)
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value.strip():
+        raise FalsifierCliError(f"{field} must be a string when supplied")
+    return value.strip()
 
 
 def _backtest_run_create(

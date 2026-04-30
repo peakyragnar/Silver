@@ -16,13 +16,16 @@ from silver.analytics.repository import (
     AnalyticsRunRepository,
     BacktestMetadataError,
     BacktestMetadataRepository,
+    BacktestReplayComparison,
     BacktestRunCreate,
     BacktestRunFinish,
     BacktestRunRecord,
     BacktestTraceabilitySnapshot,
+    ModelRunReplayMetadata,
     ModelRunCreate,
     ModelRunFinish,
     ModelRunRecord,
+    compare_backtest_replay_snapshots,
 )
 
 __all__ = [
@@ -31,6 +34,7 @@ __all__ = [
     "AnalyticsRunRepository",
     "BacktestMetadataError",
     "BacktestMetadataRepository",
+    "BacktestReplayComparison",
     "BacktestRunCreate",
     "BacktestRunFinish",
     "BacktestRunRecord",
@@ -42,8 +46,10 @@ __all__ = [
     "JsonQueryClient",
     "ModelRunCreate",
     "ModelRunFinish",
+    "ModelRunReplayMetadata",
     "ModelRunRecord",
     "TickerInputCoverage",
+    "compare_backtest_replay_snapshots",
     "load_falsifier_input_diagnostics",
     "render_falsifier_input_diagnostics",
 ]

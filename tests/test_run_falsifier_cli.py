@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import subprocess
 import sys
+from dataclasses import replace
 from datetime import date
 from pathlib import Path
 from typing import Any
@@ -625,6 +626,69 @@ def test_report_traceability_validation_checks_complete_backtest_claim_metadata(
     assert not (tmp_path / "report.md").exists()
 
 
+def test_load_falsifier_replay_plan_normalizes_stored_claim_by_key() -> None:
+    snapshot = _replay_snapshot()
+    repo = FakeReplayMetadataRepository(snapshot)
+
+    plan = cli.load_falsifier_replay_plan(
+        repo,
+        backtest_run_key="backtest-run-1",
+    )
+
+    assert repo.lookups == [
+        {"backtest_run_id": None, "backtest_run_key": "backtest-run-1"},
+    ]
+    assert plan.backtest_run_id == 2
+    assert plan.backtest_run_key == "backtest-run-1"
+    assert plan.model_run_id == 1
+    assert plan.model_run_key == "model-run-1"
+    assert plan.strategy == cli.TARGET_STRATEGY
+    assert plan.horizon == 63
+    assert plan.universe == "falsifier_seed"
+    assert plan.target_kind == "excess_return_market"
+    assert plan.feature_set_hash == "a" * 64
+    assert plan.input_fingerprint == "f" * 64
+    assert plan.available_at_policy_versions == {"daily_price": 1}
+    assert plan.model_window == cli.FalsifierModelWindow(
+        training_start_date=date(2020, 1, 2),
+        training_end_date=date(2021, 12, 31),
+        test_start_date=date(2022, 1, 3),
+        test_end_date=date(2024, 12, 31),
+        source="scorable_walk_forward",
+    )
+    assert plan.execution_assumptions == cli._execution_assumptions()
+
+
+def test_load_falsifier_replay_plan_rejects_non_accepted_claim() -> None:
+    snapshot = _replay_snapshot(backtest_status="running")
+    repo = FakeReplayMetadataRepository(snapshot)
+
+    with pytest.raises(
+        cli.FalsifierCliError,
+        match="backtest_runs.status expected 'succeeded' got 'running'",
+    ):
+        cli.load_falsifier_replay_plan(repo, backtest_run_id=2)
+
+
+def test_falsifier_replay_snapshot_validation_reports_metric_mismatch() -> None:
+    stored = _replay_snapshot()
+    replayed = replace(
+        stored,
+        backtest_metrics={"status": "succeeded", "mean_strategy_net": 0.99},
+    )
+
+    comparison = cli.compare_falsifier_replay_snapshots(stored, replayed)
+
+    assert not comparison.matches
+    assert comparison.mismatches == (
+        "backtest_runs.metrics expected "
+        "{\"mean_strategy_net\":0.018,\"status\":\"succeeded\"} got "
+        "{\"mean_strategy_net\":0.99,\"status\":\"succeeded\"}",
+    )
+    with pytest.raises(cli.FalsifierCliError, match="backtest_runs.metrics"):
+        cli.validate_falsifier_replay_snapshots(stored, replayed)
+
+
 def test_label_scramble_payload_uses_scored_strategy_test_rows(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1060,6 +1124,26 @@ class FakeMetadataRepository:
         return cli.BacktestTraceabilitySnapshot(**values)
 
 
+class FakeReplayMetadataRepository:
+    def __init__(self, snapshot: Any) -> None:
+        self.snapshot = snapshot
+        self.lookups: list[dict[str, object]] = []
+
+    def load_backtest_replay_snapshot(
+        self,
+        *,
+        backtest_run_id: int | None = None,
+        backtest_run_key: str | None = None,
+    ) -> Any:
+        self.lookups.append(
+            {
+                "backtest_run_id": backtest_run_id,
+                "backtest_run_key": backtest_run_key,
+            }
+        )
+        return self.snapshot
+
+
 class FakeInvocationRepository:
     def __init__(self) -> None:
         self.creates: list[dict[str, Any]] = []
@@ -1090,3 +1174,79 @@ class FakePolicyVersionClient:
     def fetch_json(self, sql: str) -> Any:
         self.sql = sql
         return self.payload
+
+
+def _replay_snapshot(**overrides: Any) -> Any:
+    values = {
+        "model_run_id": 1,
+        "model_run_key": "model-run-1",
+        "model_status": "succeeded",
+        "model_code_git_sha": "abcdef0",
+        "model_feature_set_hash": "a" * 64,
+        "model_feature_snapshot_ref": None,
+        "model_training_start_date": date(2020, 1, 2),
+        "model_training_end_date": date(2021, 12, 31),
+        "model_test_start_date": date(2022, 1, 3),
+        "model_test_end_date": date(2024, 12, 31),
+        "model_horizon_days": 63,
+        "model_target_kind": "excess_return_market",
+        "model_random_seed": cli.FALSIFIER_RANDOM_SEED,
+        "model_cost_assumptions": cli._model_run_cost_assumptions(),
+        "model_metrics": {"status": "succeeded", "mean_strategy_net": 0.018},
+        "model_parameters": {
+            "feature_definition": {
+                "definition_hash": "a" * 64,
+                "name": cli.TARGET_STRATEGY,
+                "version": 1,
+            },
+            "min_train_sessions": cli.DEFAULT_MIN_TRAIN_SESSIONS,
+            "step_sessions": cli.DEFAULT_STEP_SESSIONS,
+            "strategy": cli.TARGET_STRATEGY,
+            "test_sessions": cli.DEFAULT_TEST_SESSIONS,
+            "universe": "falsifier_seed",
+            "window_source": "scorable_walk_forward",
+        },
+        "model_available_at_policy_versions": {"daily_price": 1},
+        "model_input_fingerprints": {
+            "joined_feature_label_rows_sha256": "f" * 64,
+            "row_count": 840,
+        },
+        "backtest_run_id": 2,
+        "backtest_run_key": "backtest-run-1",
+        "backtest_status": "succeeded",
+        "backtest_model_run_id": 1,
+        "backtest_universe_name": "falsifier_seed",
+        "backtest_horizon_days": 63,
+        "backtest_target_kind": "excess_return_market",
+        "backtest_cost_assumptions": cli._cost_assumptions(None),
+        "backtest_metrics": {"status": "succeeded", "mean_strategy_net": 0.018},
+        "backtest_metrics_by_regime": {
+            "pre_2019": {"sample_count": 12, "strategy_net_return": {"mean": 0.01}},
+        },
+        "backtest_baseline_metrics": {
+            "equal_weight_universe": {"mean_net_horizon_return": 0.01},
+        },
+        "backtest_label_scramble_metrics": {
+            "status": "completed",
+            "p_value": 0.01,
+        },
+        "backtest_label_scramble_pass": True,
+        "backtest_parameters": {
+            "label_scramble_alpha": cli.LABEL_SCRAMBLE_ALPHA,
+            "label_scramble_seed": cli.DEFAULT_LABEL_SCRAMBLE_SEED,
+            "label_scramble_trial_count": cli.DEFAULT_LABEL_SCRAMBLE_TRIAL_COUNT,
+            "metadata_role": "backtest_run",
+            "model_run_key": "model-run-1",
+            "multiple_comparisons_correction": (
+                cli.MULTIPLE_COMPARISONS_CORRECTION
+            ),
+            "strategy": cli.TARGET_STRATEGY,
+            "target_kind": "excess_return_market",
+            "universe": "falsifier_seed",
+        },
+        "backtest_multiple_comparisons_correction": (
+            cli.MULTIPLE_COMPARISONS_CORRECTION
+        ),
+    }
+    values.update(overrides)
+    return cli.BacktestTraceabilitySnapshot(**values)
