@@ -146,6 +146,38 @@ The default report is written to:
 reports/falsifier/week_1_momentum.md
 ```
 
+To replay a persisted successful falsifier claim from the durable backtest
+identity, first inspect the stored replay contract without rerunning:
+
+```bash
+python scripts/run_falsifier.py --replay-backtest-run-id 2 --replay-dry-run
+```
+
+Healthy dry-run output names the stored identity, the reconstructed run command,
+and the frozen replay inputs:
+
+```text
+OK: falsifier replay dry-run loaded accepted claim metadata
+Replay identity: model_run_id=1; model_run_key=model-run-1; backtest_run_id=2; backtest_run_key=backtest-run-1
+Replay command: python scripts/run_falsifier.py --replay-backtest-run-id 2
+Resolved run command: python scripts/run_falsifier.py --strategy momentum_12_1 --horizon 63 --universe falsifier_seed
+Evidence: stored accepted-claim metadata matched replay contract
+Evidence: rerun not executed (--replay-dry-run)
+Replay inputs: strategy=momentum_12_1; universe=falsifier_seed; horizon=63; target_kind=excess_return_market; feature_set_hash=...; joined_feature_label_rows_sha256=...; available_at_policy_versions={"daily_price":1}
+```
+
+Then rerun and compare the replayed metadata against the stored claim:
+
+```bash
+python scripts/run_falsifier.py --replay-backtest-run-id 2 --output-path reports/falsifier/week_1_momentum_replay.md
+```
+
+Successful replay prints explicit match evidence. Any mismatch exits non-zero
+and names the drifted field, such as `backtest_runs.metrics`. Use
+`--replay-backtest-run-key <backtest_run_key>` when the key is easier to copy
+than the numeric id. A `model_run_id` alone is not accepted for full replay
+because one model run can support multiple backtest claims.
+
 ## 6. Read The Report
 
 Start with `Status`, `Data Coverage`, and `Failure Modes`. Then check

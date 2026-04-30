@@ -689,6 +689,154 @@ def test_falsifier_replay_snapshot_validation_reports_metric_mismatch() -> None:
         cli.validate_falsifier_replay_snapshots(stored, replayed)
 
 
+def test_replay_dry_run_prints_loaded_identity_and_skips_rerun() -> None:
+    snapshot = _replay_snapshot()
+    repo = FakeReplayMetadataRepository(snapshot)
+    args = cli.parse_args(
+        [
+            "--database-url",
+            "postgresql://user:pass@localhost/silver",
+            "--replay-backtest-run-id",
+            "2",
+            "--replay-dry-run",
+        ]
+    )
+
+    plan = cli.run_replay_dry_run_with_metadata(
+        args,
+        metadata_repository=repo,
+    )
+    output = cli.render_falsifier_replay_dry_run(plan)
+
+    assert repo.lookups == [{"backtest_run_id": 2, "backtest_run_key": None}]
+    assert "OK: falsifier replay dry-run loaded accepted claim metadata" in output
+    assert "model_run_id=1" in output
+    assert "backtest_run_id=2" in output
+    assert (
+        "Replay command: python scripts/run_falsifier.py "
+        "--replay-backtest-run-id 2"
+    ) in output
+    assert (
+        "Resolved run command: python scripts/run_falsifier.py "
+        "--strategy momentum_12_1 --horizon 63 --universe falsifier_seed"
+    ) in output
+    assert "Evidence: stored accepted-claim metadata matched replay contract" in output
+    assert "rerun not executed (--replay-dry-run)" in output
+
+
+def test_replay_run_uses_stored_plan_and_prints_match_evidence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    snapshot = _replay_snapshot()
+    repo = FakeReplayMetadataRepository(snapshot)
+    output_path = Path("reports/falsifier/replay.md")
+    args = cli.parse_args(
+        [
+            "--database-url",
+            "postgresql://user:pass@localhost/silver",
+            "--replay-backtest-run-key",
+            "backtest-run-1",
+            "--output-path",
+            str(output_path),
+        ]
+    )
+    captured: dict[str, Any] = {}
+
+    def fake_run_report_with_metadata(
+        replay_args: Any,
+        **_kwargs: Any,
+    ) -> Any:
+        captured["args"] = replay_args
+        return cli.FalsifierReportRun(
+            model_run=cli.ModelRunRecord(
+                id=1,
+                model_run_key="model-run-1",
+                status="succeeded",
+            ),
+            backtest_run=cli.BacktestRunRecord(
+                id=2,
+                backtest_run_key="backtest-run-1",
+                status="succeeded",
+            ),
+            status="succeeded",
+        )
+
+    monkeypatch.setattr(cli, "run_report_with_metadata", fake_run_report_with_metadata)
+
+    replay = cli.run_replay_with_metadata(
+        args,
+        client=object(),
+        metadata_repository=repo,
+        calendar=object(),
+    )
+    output = cli.render_falsifier_replay_result(replay, output_path=args.output_path)
+
+    assert repo.lookups == [
+        {"backtest_run_id": None, "backtest_run_key": "backtest-run-1"},
+        {"backtest_run_id": 2, "backtest_run_key": None},
+    ]
+    assert captured["args"].strategy == cli.TARGET_STRATEGY
+    assert captured["args"].horizon == 63
+    assert captured["args"].universe == "falsifier_seed"
+    assert captured["args"].output_path == args.output_path
+    assert replay.comparison.matches
+    assert "OK: falsifier replay matched stored metadata" in output
+    assert "stored_backtest_run_id=2" in output
+    assert "replayed_backtest_run_id=2" in output
+    assert "Evidence: all replay-critical identity and metric fields matched" in output
+    assert f"Report: {cli._display_path(args.output_path)}" in output
+
+
+def test_replay_run_fails_with_mismatch_evidence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stored = _replay_snapshot()
+    replayed = replace(
+        stored,
+        backtest_metrics={"status": "succeeded", "mean_strategy_net": 0.99},
+    )
+    repo = FakeReplayMetadataRepository(stored, replayed_snapshot=replayed)
+    output_path = Path("reports/falsifier/replay.md")
+    args = cli.parse_args(
+        [
+            "--database-url",
+            "postgresql://user:pass@localhost/silver",
+            "--replay-backtest-run-id",
+            "2",
+            "--output-path",
+            str(output_path),
+        ]
+    )
+
+    def fake_run_report_with_metadata(*_args: Any, **_kwargs: Any) -> Any:
+        return cli.FalsifierReportRun(
+            model_run=cli.ModelRunRecord(
+                id=1,
+                model_run_key="model-run-1",
+                status="succeeded",
+            ),
+            backtest_run=cli.BacktestRunRecord(
+                id=2,
+                backtest_run_key="backtest-run-1",
+                status="succeeded",
+            ),
+            status="succeeded",
+        )
+
+    monkeypatch.setattr(cli, "run_report_with_metadata", fake_run_report_with_metadata)
+
+    with pytest.raises(
+        cli.FalsifierCliError,
+        match="falsifier replay mismatch.*backtest_runs.metrics",
+    ):
+        cli.run_replay_with_metadata(
+            args,
+            client=object(),
+            metadata_repository=repo,
+            calendar=object(),
+        )
+
+
 def test_label_scramble_payload_uses_scored_strategy_test_rows(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1125,8 +1273,9 @@ class FakeMetadataRepository:
 
 
 class FakeReplayMetadataRepository:
-    def __init__(self, snapshot: Any) -> None:
+    def __init__(self, snapshot: Any, *, replayed_snapshot: Any | None = None) -> None:
         self.snapshot = snapshot
+        self.replayed_snapshot = replayed_snapshot or snapshot
         self.lookups: list[dict[str, object]] = []
 
     def load_backtest_replay_snapshot(
@@ -1141,7 +1290,9 @@ class FakeReplayMetadataRepository:
                 "backtest_run_key": backtest_run_key,
             }
         )
-        return self.snapshot
+        if len(self.lookups) == 1:
+            return self.snapshot
+        return self.replayed_snapshot
 
 
 class FakeInvocationRepository:

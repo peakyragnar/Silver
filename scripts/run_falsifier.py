@@ -94,6 +94,9 @@ TARGET_COMMAND_TEMPLATE = (
     "python scripts/run_falsifier.py --strategy {strategy} --horizon {horizon} "
     "--universe {universe}"
 )
+REPLAY_COMMAND_TEMPLATE = (
+    "python scripts/run_falsifier.py --replay-backtest-run-id {backtest_run_id}"
+)
 DEFAULT_LABEL_SCRAMBLE_SEED = 44
 DEFAULT_LABEL_SCRAMBLE_TRIAL_COUNT = 100
 LABEL_SCRAMBLE_ALPHA = 0.05
@@ -156,6 +159,16 @@ class FalsifierReplayPlan:
     model_window: FalsifierModelWindow
     cost_assumptions: Mapping[str, Any]
     execution_assumptions: Mapping[str, Any]
+
+
+@dataclass(frozen=True, slots=True)
+class FalsifierReplayRun:
+    """Result of rerunning a falsifier replay from persisted metadata."""
+
+    plan: FalsifierReplayPlan
+    report_run: FalsifierReportRun
+    replayed_snapshot: BacktestTraceabilitySnapshot
+    comparison: BacktestReplayComparison
 
 
 class PsqlJsonClient:
@@ -241,6 +254,20 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "--psql-path",
         help="path to psql; defaults to the first psql on PATH",
     )
+    parser.add_argument(
+        "--replay-backtest-run-id",
+        type=int,
+        help="load a persisted falsifier backtest by durable backtest_run_id",
+    )
+    parser.add_argument(
+        "--replay-backtest-run-key",
+        help="load a persisted falsifier backtest by durable backtest_run_key",
+    )
+    parser.add_argument(
+        "--replay-dry-run",
+        action="store_true",
+        help="load replay metadata and print evidence without rerunning",
+    )
     return parser.parse_args(argv)
 
 
@@ -250,6 +277,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         _validate_args(args)
         if args.check:
             run_check(args)
+            return 0
+        if _is_replay_mode(args):
+            run_replay(args)
             return 0
         run_report(args)
     except (
@@ -314,6 +344,135 @@ def run_report(args: argparse.Namespace) -> None:
         f"OK: wrote {_display_path(args.output_path)} with status "
         f"{report_run.status}; model_run_id={report_run.model_run.id}; "
         f"backtest_run_id={report_run.backtest_run.id}"
+    )
+
+
+def run_replay(args: argparse.Namespace) -> None:
+    if not args.database_url:
+        raise FalsifierCliError(
+            "DATABASE_URL is required unless --check is used. Run "
+            "`python scripts/bootstrap_database.py` after setting DATABASE_URL, "
+            "then rerun the falsifier command."
+        )
+
+    connection = _connect_metadata_database(args.database_url)
+    try:
+        metadata_repository = BacktestMetadataRepository(connection)
+        if args.replay_dry_run:
+            plan = run_replay_dry_run_with_metadata(
+                args,
+                metadata_repository=metadata_repository,
+            )
+            _commit(connection)
+            print(render_falsifier_replay_dry_run(plan))
+            return
+
+        calendar = TradingCalendar(load_seed_csv(DEFAULT_TRADING_CALENDAR_SEED_PATH))
+        client = PsqlJsonClient(
+            database_url=args.database_url,
+            psql_path=args.psql_path,
+        )
+        try:
+            replay = run_replay_with_metadata(
+                args,
+                client=client,
+                metadata_repository=metadata_repository,
+                invocation_repository=AnalyticsRunRepository(connection),
+                calendar=calendar,
+            )
+        except Exception:
+            _commit(connection)
+            raise
+        else:
+            _commit(connection)
+    finally:
+        _close(connection)
+    print(render_falsifier_replay_result(replay, output_path=args.output_path))
+
+
+def run_replay_dry_run_with_metadata(
+    args: argparse.Namespace,
+    *,
+    metadata_repository: BacktestMetadataRepository,
+) -> FalsifierReplayPlan:
+    return load_falsifier_replay_plan(
+        metadata_repository,
+        **_replay_lookup(args),
+    )
+
+
+def run_replay_with_metadata(
+    args: argparse.Namespace,
+    *,
+    client: PsqlJsonClient,
+    metadata_repository: BacktestMetadataRepository,
+    calendar: TradingCalendar,
+    invocation_repository: AnalyticsRunRepository | None = None,
+) -> FalsifierReplayRun:
+    plan = run_replay_dry_run_with_metadata(
+        args,
+        metadata_repository=metadata_repository,
+    )
+    replay_args = _args_from_replay_plan(args, plan)
+    report_run = run_report_with_metadata(
+        replay_args,
+        client=client,
+        metadata_repository=metadata_repository,
+        invocation_repository=invocation_repository,
+        calendar=calendar,
+    )
+    replayed_snapshot = metadata_repository.load_backtest_replay_snapshot(
+        backtest_run_id=report_run.backtest_run.id,
+    )
+    comparison = compare_falsifier_replay_snapshots(plan.snapshot, replayed_snapshot)
+    replay = FalsifierReplayRun(
+        plan=plan,
+        report_run=report_run,
+        replayed_snapshot=replayed_snapshot,
+        comparison=comparison,
+    )
+    if not comparison.matches:
+        raise FalsifierCliError(_replay_mismatch_message(replay))
+    return replay
+
+
+def render_falsifier_replay_dry_run(plan: FalsifierReplayPlan) -> str:
+    return "\n".join(
+        (
+            "OK: falsifier replay dry-run loaded accepted claim metadata",
+            _render_replay_identity(plan),
+            f"Replay command: {_replay_command(plan)}",
+            f"Resolved run command: {_resolved_run_command(plan)}",
+            "Evidence: stored accepted-claim metadata matched replay contract",
+            "Evidence: rerun not executed (--replay-dry-run)",
+            _render_replay_inputs(plan),
+        )
+    )
+
+
+def render_falsifier_replay_result(
+    replay: FalsifierReplayRun,
+    *,
+    output_path: Path,
+) -> str:
+    comparison = replay.comparison
+    plan = replay.plan
+    return "\n".join(
+        (
+            "OK: falsifier replay matched stored metadata",
+            _render_replay_identity(plan),
+            (
+                "Replay comparison: "
+                f"stored_backtest_run_id={comparison.stored_backtest_run_id}; "
+                f"replayed_backtest_run_id={comparison.replayed_backtest_run_id}; "
+                f"stored_backtest_run_key={comparison.stored_backtest_run_key}; "
+                f"replayed_backtest_run_key={comparison.replayed_backtest_run_key}"
+            ),
+            f"Replay command: {_replay_command(plan)}",
+            f"Resolved run command: {_resolved_run_command(plan)}",
+            "Evidence: all replay-critical identity and metric fields matched",
+            f"Report: {_display_path(output_path)}",
+        )
     )
 
 
@@ -2214,12 +2373,128 @@ def _trace_token(value: object) -> str:
     return repr(value)
 
 
+def _is_replay_mode(args: argparse.Namespace) -> bool:
+    return (
+        args.replay_backtest_run_id is not None
+        or args.replay_backtest_run_key is not None
+        or args.replay_dry_run
+    )
+
+
+def _replay_lookup(args: argparse.Namespace) -> dict[str, object]:
+    return {
+        "backtest_run_id": args.replay_backtest_run_id,
+        "backtest_run_key": args.replay_backtest_run_key,
+    }
+
+
+def _args_from_replay_plan(
+    args: argparse.Namespace,
+    plan: FalsifierReplayPlan,
+) -> argparse.Namespace:
+    if plan.strategy != TARGET_STRATEGY:
+        raise FalsifierCliError(
+            f"falsifier replay only supports strategy {TARGET_STRATEGY}; "
+            f"stored run uses {plan.strategy}"
+        )
+    replay_args = argparse.Namespace(
+        strategy=plan.strategy,
+        horizon=plan.horizon,
+        universe=plan.universe,
+        output_path=args.output_path,
+        check=False,
+        database_url=args.database_url,
+        psql_path=args.psql_path,
+        replay_backtest_run_id=None,
+        replay_backtest_run_key=None,
+        replay_dry_run=False,
+    )
+    _validate_args(replay_args)
+    return replay_args
+
+
+def _render_replay_identity(plan: FalsifierReplayPlan) -> str:
+    return (
+        "Replay identity: "
+        f"model_run_id={plan.model_run_id}; "
+        f"model_run_key={plan.model_run_key}; "
+        f"backtest_run_id={plan.backtest_run_id}; "
+        f"backtest_run_key={plan.backtest_run_key}"
+    )
+
+
+def _render_replay_inputs(plan: FalsifierReplayPlan) -> str:
+    return (
+        "Replay inputs: "
+        f"strategy={plan.strategy}; "
+        f"universe={plan.universe}; "
+        f"horizon={plan.horizon}; "
+        f"target_kind={plan.target_kind}; "
+        f"feature_set_hash={plan.feature_set_hash}; "
+        f"joined_feature_label_rows_sha256={plan.input_fingerprint}; "
+        "available_at_policy_versions="
+        f"{_stable_json_token(plan.available_at_policy_versions)}"
+    )
+
+
+def _replay_command(plan: FalsifierReplayPlan) -> str:
+    return REPLAY_COMMAND_TEMPLATE.format(backtest_run_id=plan.backtest_run_id)
+
+
+def _resolved_run_command(plan: FalsifierReplayPlan) -> str:
+    return TARGET_COMMAND_TEMPLATE.format(
+        strategy=plan.strategy,
+        horizon=plan.horizon,
+        universe=plan.universe,
+    )
+
+
+def _stable_json_token(value: Mapping[str, Any]) -> str:
+    return json.dumps(value, sort_keys=True, separators=(",", ":"))
+
+
+def _replay_mismatch_message(replay: FalsifierReplayRun) -> str:
+    mismatches = "; ".join(replay.comparison.mismatches)
+    return (
+        f"falsifier replay mismatch for backtest_run_id="
+        f"{replay.plan.backtest_run_id}: {mismatches}"
+    )
+
+
 def _validate_args(args: argparse.Namespace) -> None:
     if args.horizon not in CANONICAL_HORIZONS:
         allowed = ", ".join(str(horizon) for horizon in CANONICAL_HORIZONS)
         raise FalsifierCliError(f"horizon must be one of {allowed}; got {args.horizon}")
     if not isinstance(args.universe, str) or not args.universe.strip():
         raise FalsifierCliError("universe must be a non-empty string")
+    replay_identity_count = sum(
+        (
+            args.replay_backtest_run_id is not None,
+            args.replay_backtest_run_key is not None,
+        )
+    )
+    if args.check and _is_replay_mode(args):
+        raise FalsifierCliError(
+            "--check cannot be combined with replay flags; use "
+            "--replay-dry-run to inspect persisted replay metadata"
+        )
+    if replay_identity_count > 1:
+        raise FalsifierCliError(
+            "supply exactly one of --replay-backtest-run-id or "
+            "--replay-backtest-run-key"
+        )
+    if args.replay_dry_run and replay_identity_count == 0:
+        raise FalsifierCliError(
+            "--replay-dry-run requires --replay-backtest-run-id or "
+            "--replay-backtest-run-key"
+        )
+    if args.replay_backtest_run_id is not None and args.replay_backtest_run_id <= 0:
+        raise FalsifierCliError("--replay-backtest-run-id must be positive")
+    if (
+        args.replay_backtest_run_key is not None
+        and not args.replay_backtest_run_key.strip()
+    ):
+        raise FalsifierCliError("--replay-backtest-run-key must be non-empty")
     _validate_report_path(args.output_path)
 
 

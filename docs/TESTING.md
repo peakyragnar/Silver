@@ -155,3 +155,36 @@ Replay-from-run-id contract tests must cover the read side of that proof:
 - proving replay paths do not call live ingest or vendor clients and do not
   derive deterministic identity from UUIDs, timestamps, process ids, host/user
   names, output paths, report paths, or database surrogate ids
+
+## Replay CLI Validation
+
+The operator replay path starts from a durable backtest identity, not from
+manually re-entered strategy, universe, horizon, feature, or policy arguments.
+Use dry-run mode to validate the stored replay contract without writing a new
+report:
+
+```bash
+python scripts/run_falsifier.py --replay-backtest-run-id 2 --replay-dry-run
+```
+
+Expected dry-run evidence includes:
+
+```text
+OK: falsifier replay dry-run loaded accepted claim metadata
+Replay command: python scripts/run_falsifier.py --replay-backtest-run-id 2
+Resolved run command: python scripts/run_falsifier.py --strategy momentum_12_1 --horizon 63 --universe falsifier_seed
+Evidence: stored accepted-claim metadata matched replay contract
+Evidence: rerun not executed (--replay-dry-run)
+```
+
+Use replay mode without `--replay-dry-run` to rerun and compare the replayed
+claim metadata against the stored accepted claim:
+
+```bash
+python scripts/run_falsifier.py --replay-backtest-run-id 2 --output-path reports/falsifier/week_1_momentum_replay.md
+```
+
+A match prints `Evidence: all replay-critical identity and metric fields
+matched`. A mismatch must exit non-zero and name the drifted field. `model_run_id`
+by itself remains audit metadata only; full replay requires `backtest_run_id` or
+`backtest_run_key` so Silver can select exactly one complete backtest claim.
