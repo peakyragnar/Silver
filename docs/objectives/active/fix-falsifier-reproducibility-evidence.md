@@ -307,3 +307,62 @@ Conflict Zones:
 - `tests/test_label_scramble.py`
 - `tests/test_falsifier_report.py`
 - `tests/test_backtest_metadata_repository.py`
+
+## ARR-61 Validation Handoff
+
+Date: 2026-04-30
+Branch: `arr-61-validate-falsifier-repro-evidence`
+Base SHA after sync: `a690535`
+
+Completion Summary:
+ARR-61 validated the falsifier reproducibility and evidence-integrity Objective
+end to end through focused replay, label-scramble, report-evidence, metadata,
+and broad repository checks. No feature, ingestion, source, schema, or migration
+behavior changed.
+
+Focused Validation Output:
+
+```text
+$ python -m pytest tests/test_run_falsifier_cli.py tests/test_label_scramble.py tests/test_falsifier_report.py tests/test_backtest_metadata_repository.py
+============================= test session starts ==============================
+platform darwin -- Python 3.10.17, pytest-8.1.1, pluggy-1.6.0
+rootdir: /Users/michael/silver-agent-workspaces/ARR-61
+configfile: pyproject.toml
+plugins: timeout-2.2.0, anyio-4.9.0, cov-4.1.0, mock-3.12.0, asyncio-0.23.0
+asyncio: mode=strict
+collected 33 items
+
+tests/test_run_falsifier_cli.py .................                        [ 51%]
+tests/test_label_scramble.py ....                                        [ 63%]
+tests/test_falsifier_report.py ...                                       [ 72%]
+tests/test_backtest_metadata_repository.py .........                     [100%]
+
+============================== 33 passed in 0.94s ==============================
+```
+
+Required Validation:
+
+```text
+$ git diff --check
+<no output; passed>
+
+$ ruff check .
+All checks passed!
+
+$ python scripts/run_falsifier.py --check
+OK: falsifier CLI check passed for python scripts/run_falsifier.py --strategy momentum_12_1 --horizon 63 --universe falsifier_seed -> reports/falsifier/week_1_momentum.md
+
+$ python -m pytest
+============================= 299 passed in 5.34s ==============================
+```
+
+Live Falsifier:
+
+```text
+$ python scripts/run_falsifier.py --strategy momentum_12_1 --horizon 63 --universe falsifier_seed
+error: DATABASE_URL is required unless --check is used. Run `python scripts/bootstrap_database.py` after setting DATABASE_URL, then rerun the falsifier command.
+```
+
+Skip Reason:
+`DATABASE_URL` was not present in the validation shell, so the DB-backed live
+falsifier report run was skipped after capturing the CLI prerequisite failure.
