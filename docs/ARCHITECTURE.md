@@ -115,6 +115,41 @@ Allowed sources for v1 are FMP, SEC EDGAR, optional Arrow raw byte caches, and
 optional Norgate data later for delistings. Do not depend on Arrow normalized
 tables, Arrow Python code, or analyst-facing views.
 
+## FMP Response Audit Boundary
+
+Every FMP HTTP response produced by the transport is raw-vault evidence,
+including:
+
+- successful 2xx responses
+- transient failed attempts that will be retried
+- terminal non-2xx responses that will raise an FMP client error
+
+The source client must attempt the raw-vault write before JSON parsing,
+normalization, retry sleep, success return, or raising an HTTP error. Transport
+exceptions that produce no HTTP status and no response body are not raw objects;
+they may be logged or surfaced as client errors with secrets redacted.
+
+FMP raw-vault writes use the existing `silver.raw_objects` fields for redacted
+request URL, redacted params, HTTP status, content type, exact response bytes,
+body hash, request fingerprint, `fetched_at`, and JSON metadata. Attempt
+metadata for this contract belongs in `raw_objects.metadata` and must identify:
+
+- `audit_contract`: `fmp-response-audit-v1`
+- one-based `attempt_number`
+- `max_retries` and derived `max_attempts`
+- whether the status is retryable
+- whether this response is terminal for the request
+- the attempt outcome: `success`, `retry_scheduled`, or `terminal_failure`
+
+No schema migration is required to store distinct failed-response bytes,
+terminal non-2xx bodies, transient-before-success bodies, redacted request
+evidence, or per-row attempt metadata. The existing uniqueness key
+`(vendor, endpoint, params_hash, raw_hash)` does mean byte-identical retries for
+the same request can resolve to the same raw object. A raw-vault write must
+still be attempted for each transport-produced response, but strict per-attempt
+row cardinality for byte-identical retry bodies requires a follow-up schema
+ticket, such as an additive attempt-event table keyed to `raw_objects.id`.
+
 ## LLM Boundary
 
 LLMs may extract structured text features, propose hypotheses, and explain

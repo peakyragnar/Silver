@@ -83,6 +83,14 @@ python scripts/ingest_fmp_prices.py --universe falsifier_seed
 Use explicit `--start-date YYYY-MM-DD` and `--end-date YYYY-MM-DD` when you want
 a reproducible ingest window.
 
+FMP ingest must raw-vault every HTTP response returned by the transport before
+parsing, retrying, returning success, or raising for a terminal non-2xx status.
+The persisted request URL and params must be redacted, and metadata must record
+attempt number, retry budget, retryable/terminal status, and outcome. The
+current raw vault stores one row per unique `(vendor, endpoint, params_hash,
+raw_hash)`; byte-identical retry bodies can dedupe to an existing row even
+though the client still must attempt a write for each response.
+
 ## 4. Materialize Labels And Features
 
 Forward-return labels come from normalized prices and remain unavailable until

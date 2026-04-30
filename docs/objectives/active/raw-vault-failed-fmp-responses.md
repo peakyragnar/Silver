@@ -46,6 +46,40 @@ Guardrails:
   proves the raw vault needs a shared helper.
 - Do not introduce live or paid vendor access in tests.
 
+ARR-62 Contract:
+- Scope: every FMP HTTP response produced by the transport is raw-vault
+  evidence, including successful 2xx responses, transient failed responses that
+  will be retried, and terminal non-2xx responses that will raise.
+- Ordering: the client must attempt the raw-vault write before parsing,
+  normalization, retry sleep, success return, or raising `FMPHTTPError`.
+- Required raw-vault fields: redacted request URL, redacted params, HTTP status,
+  content type when available, exact response bytes, body hash, request
+  fingerprint, `fetched_at`, and metadata.
+- Required metadata: `audit_contract=fmp-response-audit-v1`, one-based attempt
+  number, max retries, max attempts, retryable flag, terminal flag, and attempt
+  outcome of `success`, `retry_scheduled`, or `terminal_failure`.
+- Redaction guarantee: persisted request URLs and params must redact `apikey`
+  and credential-like fields. Logs, exceptions, reports, screenshots, and proof
+  packets must not print `FMP_API_KEY`, `DATABASE_URL`, or local credentials.
+- No live calls: all contract and implementation validation uses mocked FMP
+  transport responses unless Michael explicitly approves live vendor access.
+
+Schema Finding:
+- No schema migration is required to persist distinct failed-response bodies,
+  terminal non-2xx responses before raise, transient-before-success responses,
+  redacted request evidence, or per-row attempt metadata because
+  `silver.raw_objects` already has `request_url`, `params`, `http_status`,
+  body storage, hashes, `fetched_at`, and `metadata`.
+- The existing raw-vault uniqueness key is `(vendor, endpoint, params_hash,
+  raw_hash)`. Byte-identical retries for the same request can therefore resolve
+  to one existing raw object. The client must still attempt a raw-vault write
+  for every transport-produced response, but strict per-attempt row cardinality
+  for byte-identical retry bodies needs a follow-up schema ticket, such as an
+  additive attempt-event table keyed to `raw_objects.id`.
+- ARR-62 does not authorize a migration. Downstream implementation must not
+  claim strict byte-identical retry cardinality unless that schema gap is closed
+  by a migration-owner ticket.
+
 Project Adapter:
 Silver project adapter: FMP ingestion, raw vault, secret redaction, and local
 mocked tests.
