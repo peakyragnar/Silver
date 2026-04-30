@@ -20,6 +20,9 @@ and humans building Silver.
   Objectives, tickets, stewards, migrations, and conflicts
 - [`AGENTIC_BUILD_SYSTEM_CORE.md`](AGENTIC_BUILD_SYSTEM_CORE.md): portable
   objective-to-ticket orchestration core design and implementation stages
+- [`OBJECTIVE_CONTROLLER_SCHEMATIC.md`](OBJECTIVE_CONTROLLER_SCHEMATIC.md):
+  readable system map for the objective controller, ledger, Linear mirror,
+  Symphony, GitHub, repair, merge, and safety flow
 - [`../scripts/work_ledger.py`](../scripts/work_ledger.py): local Objective and
   ticket ledger CLI for fast orchestration state
 - [`../scripts/linear_mirror.py`](../scripts/linear_mirror.py): mirrors local
