@@ -638,28 +638,66 @@ def decide_issue_action(
     if pr.is_draft:
         return Decision("wait", "PR is still draft", pr.number)
 
+    safety_allowance: str | None = None
     safety_trigger = safety_review_trigger(issue, pr)
     if safety_trigger is not None:
-        return Decision("move_safety_review", safety_trigger, pr.number)
+        safety_allowance = planned_contract_safety_allowance(
+            issue,
+            pr,
+            safety_trigger,
+        )
+        if safety_allowance is None:
+            return Decision("move_safety_review", safety_trigger, pr.number)
 
     merge_state = (pr.merge_state_status or "UNKNOWN").upper()
     if merge_state == "DIRTY":
-        return Decision("move_rework", "PR has merge conflicts", pr.number)
+        return Decision(
+            "move_rework",
+            decision_reason(safety_allowance, "PR has merge conflicts"),
+            pr.number,
+        )
 
     check_status = required_check_status(pr, required_checks)
     if check_status.action == "move_rework":
-        return Decision("move_rework", check_status.reason, pr.number)
+        return Decision(
+            "move_rework",
+            decision_reason(safety_allowance, check_status.reason),
+            pr.number,
+        )
     if check_status.action == "wait":
-        return Decision("wait", check_status.reason, pr.number)
+        return Decision(
+            "wait",
+            decision_reason(safety_allowance, check_status.reason),
+            pr.number,
+        )
 
     if merge_state in {"BLOCKED", "UNKNOWN"}:
-        return Decision("wait", f"PR merge state is {merge_state}", pr.number)
+        return Decision(
+            "wait",
+            decision_reason(safety_allowance, f"PR merge state is {merge_state}"),
+            pr.number,
+        )
     if pr.in_merge_queue:
-        return Decision("wait", "PR is already in GitHub merge queue", pr.number)
+        return Decision(
+            "wait",
+            decision_reason(
+                safety_allowance,
+                "PR is already in GitHub merge queue",
+            ),
+            pr.number,
+        )
     if pr.auto_merge_enabled:
-        return Decision("wait", "PR auto-merge is already enabled", pr.number)
+        return Decision(
+            "wait",
+            decision_reason(safety_allowance, "PR auto-merge is already enabled"),
+            pr.number,
+        )
 
-    return Decision("queue", "PR is approved, green, and mergeable", pr.number)
+    return Decision(
+        "queue",
+        decision_reason(safety_allowance, "PR is approved, green, and mergeable"),
+        pr.number,
+    )
 
 
 def decide_stale_issue_action(
@@ -854,6 +892,95 @@ def safety_review_trigger(issue: LinearIssue, pr: PullRequest) -> str | None:
         return f"automation permission expansion: {automation_path}"
 
     return None
+
+
+def planned_contract_safety_allowance(
+    issue: LinearIssue,
+    pr: PullRequest,
+    safety_trigger: str,
+) -> str | None:
+    if issue_ticket_role(issue.description) != "contract":
+        return None
+    if not safety_trigger.startswith("PIT rule change:"):
+        return None
+    if "PR metadata" in safety_trigger:
+        return None
+
+    changed_files = tuple(pr.changed_files)
+    if not changed_files:
+        return None
+    paths = tuple(
+        normalized
+        for changed_file in changed_files
+        if (normalized := _normalize_path(changed_file.path))
+    )
+    if not paths or not all(_is_docs_artifact_path(path) for path in paths):
+        return None
+    if any(changed_file.deletions != 0 for changed_file in changed_files):
+        return None
+
+    owns = issue_section_paths(issue.description, "Owns")
+    if not owns or not all(_path_is_covered(path, owns) for path in paths):
+        return None
+
+    do_not_touch = issue_section_paths(issue.description, "Do Not Touch")
+    if any(_path_is_covered(path, do_not_touch) for path in paths):
+        return None
+
+    if pit_relaxation_signal(pr.diff or ""):
+        return None
+
+    return (
+        "planned contract docs-only PIT clarification in ticket-owned paths "
+        f"(original trigger: {safety_trigger})"
+    )
+
+
+def decision_reason(prefix: str | None, reason: str) -> str:
+    if prefix is None:
+        return reason
+    return f"{prefix}; {reason}"
+
+
+def issue_ticket_role(description: str) -> str:
+    match = re.search(r"(?im)^Ticket Role:\s*`?(?P<role>[a-z_ -]+)`?\s*$", description)
+    if match is None:
+        return ""
+    return match.group("role").strip().lower().replace(" ", "-")
+
+
+def issue_section_paths(description: str, heading: str) -> tuple[str, ...]:
+    section = _markdown_section(description, heading)
+    if not section:
+        return ()
+    return tuple(
+        normalized
+        for path in re.findall(r"`([^`]+)`", section)
+        if (normalized := _normalize_path(path))
+    )
+
+
+def _is_docs_artifact_path(path: str) -> bool:
+    return path.endswith((".md", ".rst", ".txt"))
+
+
+def _path_is_covered(path: str, allowed_paths: Sequence[str]) -> bool:
+    return any(_path_matches(path, allowed_path) for allowed_path in allowed_paths)
+
+
+def pit_relaxation_signal(diff: str) -> bool:
+    added_text = _added_diff_text(diff)
+    if not added_text:
+        return False
+    return _matches_any(
+        added_text,
+        (
+            r"\b(relax|bypass|disable|ignore|weaken|remove)\b.{0,80}"
+            r"\b(available_at|point-in-time|pit|asof_date|lookahead)\b",
+            r"\b(available_at|point-in-time|pit|asof_date|lookahead)\b.{0,80}"
+            r"\b(optional|not required|no longer required|may be ignored)\b",
+        ),
+    )
 
 
 def build_safety_review_comment(
