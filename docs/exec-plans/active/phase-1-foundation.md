@@ -44,6 +44,23 @@ signal on the seed universe.
 - [x] `python scripts/run_falsifier.py --check`
 - [x] `python scripts/run_falsifier.py --strategy momentum_12_1 --horizon 63 --universe falsifier_seed` (command exists; live run requires persisted feature and label prerequisites)
 
+## Current Readiness
+
+As of 2026-04-30, the non-mutating Phase 1 wiring checks pass:
+
+- `python scripts/check_phase1_environment.py --check`
+- `python scripts/run_phase1_pipeline.py --check`
+- `python scripts/check_falsifier_inputs.py --check`
+
+Live Phase 1 execution still requires a reachable `DATABASE_URL`. Use:
+
+```bash
+python scripts/check_phase1_environment.py --check --live-db
+```
+
+before bootstrap, ingest, materialization, or falsifier apply-mode commands.
+A set-but-invalid database URL is not sufficient readiness.
+
 ## Falsifier Command
 
 Validate the full Phase 1 pipeline wiring without live database writes or FMP

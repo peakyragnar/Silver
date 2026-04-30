@@ -99,6 +99,7 @@ class ControllerConfig:
     preflight_required_env: tuple[str, ...]
     preflight_required_commands: tuple[str, ...]
     preflight_required_auth: tuple[str, ...]
+    preflight_project_checks: tuple[str, ...]
     proof_packet_dir: Path
     validation_commands: tuple[str, ...]
     output_format: OutputFormat
@@ -286,7 +287,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.check:
             print(check_configuration(config))
             print()
-            print(render_preflight_result(preflight, detail=not config.quiet))
+            print(
+                render_preflight_result(
+                    preflight,
+                    detail=not config.quiet or not preflight_passed(preflight),
+                )
+            )
             return 0 if preflight_passed(preflight) else 1
 
         if not preflight_passed(preflight):
@@ -424,6 +430,7 @@ def controller_config_from_args(args: argparse.Namespace) -> ControllerConfig:
             preflight.get("required_commands")
         ),
         preflight_required_auth=tuple_texts(preflight.get("required_auth")),
+        preflight_project_checks=tuple_texts(preflight.get("required_checks")),
         proof_packet_dir=(
             root
             / first_text(
@@ -865,6 +872,8 @@ def run_preflight(
 
     if "github_cli" in config.preflight_required_auth:
         checks.append(github_cli_auth_check(environment))
+    for command in config.preflight_project_checks:
+        checks.append(project_preflight_command_check(command, config, environment))
     return PreflightResult(tuple(checks))
 
 
@@ -882,6 +891,60 @@ def github_cli_auth_check(env: Mapping[str, str]) -> PreflightCheck:
         return PreflightCheck("ok", "GitHub auth", "gh auth status passed")
     detail = result.stderr.strip() or result.stdout.strip() or "not authenticated"
     return PreflightCheck("error", "GitHub auth", detail.splitlines()[0])
+
+
+def project_preflight_command_check(
+    command: str,
+    config: ControllerConfig,
+    env: Mapping[str, str],
+) -> PreflightCheck:
+    try:
+        argv = shlex.split(command.replace("{python}", sys.executable))
+    except ValueError as exc:
+        return PreflightCheck(
+            "error",
+            f"project preflight {command}",
+            f"invalid command: {exc}",
+        )
+    if not argv:
+        return PreflightCheck("error", "project preflight", "empty command")
+
+    result = subprocess.run(
+        argv,
+        cwd=config.root,
+        text=True,
+        capture_output=True,
+        check=False,
+        env=dict(env),
+    )
+    if result.returncode == 0:
+        return PreflightCheck("ok", f"project preflight {command}", "passed")
+    return PreflightCheck(
+        "error",
+        f"project preflight {command}",
+        summarize_project_preflight_failure(result, env),
+    )
+
+
+def summarize_project_preflight_failure(
+    result: subprocess.CompletedProcess[str],
+    env: Mapping[str, str],
+) -> str:
+    combined = "\n".join((result.stderr, result.stdout))
+    for line in combined.splitlines():
+        stripped = line.strip()
+        if stripped.startswith(("FAIL:", "error:")):
+            return redact_env_values(stripped, env)
+    return f"exit code {result.returncode}"
+
+
+def redact_env_values(message: str, env: Mapping[str, str]) -> str:
+    redacted = message
+    for name in ("DATABASE_URL", "FMP_API_KEY", "LINEAR_API_KEY"):
+        value = env.get(name)
+        if value:
+            redacted = redacted.replace(value, "<redacted>")
+    return redacted
 
 
 def preflight_passed(result: PreflightResult) -> bool:

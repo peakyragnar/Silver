@@ -169,6 +169,7 @@ Objective completes
 | Linear Mirror | Makes runnable ledger tickets visible to Symphony. | Become the planning brain. |
 | Symphony Pipes | Runs Codex agents in workspaces for active tickets. | Decide Objective direction or merge policy. |
 | GitHub / VCS Reconciler | Reads PRs, checks, changed files, and mergeability. | Guess Objective context without ticket metadata. |
+| Project Adapter | Supplies repo-specific validation, safety, and readiness checks. | Hide local readiness failures behind generic env presence. |
 | Merge Steward | Queues green mergeable PRs and marks landed work Done. | Resolve semantic or safety exceptions. |
 | Integration Steward / Repair Runner | Handles routine branch drift, failed checks, and bounded repair packets. | Silently repair destructive, semantic, security, paid/live, or scope-risk changes. |
 | Safety Review | Human stop for real risk. | Catch routine engineering cleanup. |
@@ -178,7 +179,7 @@ Objective completes
 Dry-run one controller cycle:
 
 ```bash
-python scripts/objective_run.py
+uv run python scripts/objective_run.py
 ```
 
 Apply one controller cycle:
@@ -187,19 +188,23 @@ Apply one controller cycle:
 set -a
 source .env
 set +a
-python scripts/objective_run.py --apply
+uv run python scripts/objective_run.py --apply
 ```
 
 Run repeated controller cycles:
 
 ```bash
-python scripts/objective_run.py --apply --watch --max-cycles 20 --poll-interval 60
+uv run python scripts/objective_run.py --apply --daemon
 ```
+
+Silver's adapter preflight includes a live database readiness check before
+dispatch. A `DATABASE_URL` that is set but rejected by Postgres stops the
+controller before tickets are mirrored to Linear/Symphony.
 
 Default repair mode is `plan`. Bounded repair execution is opt-in:
 
 ```bash
-python scripts/objective_run.py \
+uv run python scripts/objective_run.py \
   --apply \
   --repair-mode apply \
   --push-repairs \

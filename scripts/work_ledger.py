@@ -444,10 +444,6 @@ def active_objective_proposals(
         for objective in proposal.objectives
         if objective.source.kind == "objective_file"
     )
-    if not objectives:
-        raise WorkLedgerError(
-            "no active Objective files found to import from docs/objectives/active"
-        )
     return objectives
 
 

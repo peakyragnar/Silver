@@ -295,6 +295,32 @@ def test_cli_import_and_status(tmp_path: Path, capsys) -> None:
     assert '"tickets": 3' in output
 
 
+def test_import_without_active_objectives_is_noop(tmp_path: Path, capsys) -> None:
+    root = _write_repo_with_objective(tmp_path)
+    for path in (root / "docs" / "objectives" / "active").glob("*.md"):
+        path.unlink()
+    ledger_path = tmp_path / "ledger.db"
+
+    assert work_ledger.active_objective_proposals(root) == ()
+    assert work_ledger.main(["--ledger", str(ledger_path), "init"]) == 0
+    assert (
+        work_ledger.main(
+            [
+                "--ledger",
+                str(ledger_path),
+                "--root",
+                str(root),
+                "import-objectives",
+            ]
+        )
+        == 0
+    )
+
+    output = capsys.readouterr().out
+    assert "Objectives: 0" in output
+    assert "Tickets created: 0" in output
+
+
 def _write_repo_with_objective(root: Path) -> Path:
     active_dir = root / "docs" / "objectives" / "active"
     completed_dir = root / "docs" / "objectives" / "completed"

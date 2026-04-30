@@ -284,12 +284,15 @@ uv run python scripts/objective_run.py --apply --daemon
 ```
 
 Controller apply mode preflights `DATABASE_URL`, `FMP_API_KEY`,
-`LINEAR_API_KEY`, `gh`, and `gh auth status` before dispatch. It then imports
-approved Objective files, admits runnable DAG tickets, runs VCS/safety policy in
-dry-run before the Linear mirror, and only then mirrors runnable tickets for
-Symphony. Quiet summary events are the default; add `--verbose` for full
-subprocess commands. Apply runs write one final objective proof packet under
-`.silver/proof_packets/objectives/`.
+`LINEAR_API_KEY`, `gh`, `gh auth status`, and adapter-defined project checks
+before dispatch. Silver's project adapter runs
+`scripts/check_phase1_environment.py --check --live-db`, so an invalid
+`DATABASE_URL` stops the run before Linear/Symphony receives work. It then
+imports approved Objective files, admits runnable DAG tickets, runs VCS/safety
+policy in dry-run before the Linear mirror, and only then mirrors runnable
+tickets for Symphony. Quiet summary events are the default; add `--verbose` for
+full subprocess commands. Apply runs write one final objective proof packet
+under `.silver/proof_packets/objectives/`.
 
 Default repair mode is `plan`: the controller records repair packets and shows
 repair-runner plans. It does not silently edit conflicted code. To execute
