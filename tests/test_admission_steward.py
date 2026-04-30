@@ -255,10 +255,15 @@ def test_apply_promotion_comments_and_moves_to_todo() -> None:
     assert linear.state_updates == [("issue-id", "todo-id")]
 
 
-def test_dry_run_reports_without_writes(capsys) -> None:
+def test_dry_run_reports_without_writes(capsys, monkeypatch) -> None:
     issue = _issue("ARR-41", description=_description("wire-backtest-metadata-registry"))
     linear = _FakeLinear(issues=(issue,))
     github = _FakeGitHub()
+    monkeypatch.setattr(
+        admission_steward,
+        "active_objective_ids",
+        lambda root=admission_steward.ROOT: {"wire-backtest-metadata-registry"},
+    )
     args = argparse.Namespace(
         project="silver",
         limit=100,

@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Validate local Phase 1 prerequisites without touching live services."""
+"""Validate local Phase 1 prerequisites."""
 
 from __future__ import annotations
 
@@ -11,13 +11,14 @@ import sys
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import Any, ContextManager, Literal
 
 
 ROOT = Path(__file__).resolve().parents[1]
 
 CheckStatus = Literal["ok", "warning", "error"]
 FindSpec = Callable[[str], object | None]
+DatabaseConnector = Callable[[str], ContextManager[Any]]
 
 
 @dataclass(frozen=True, slots=True)
@@ -67,6 +68,14 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
             "paths without connecting to Postgres or FMP"
         ),
     )
+    parser.add_argument(
+        "--live-db",
+        action="store_true",
+        help=(
+            "also verify DATABASE_URL reaches Postgres with SELECT 1; "
+            "does not print connection details"
+        ),
+    )
     return parser.parse_args(argv)
 
 
@@ -78,6 +87,8 @@ def collect_checks(
     required_imports: Sequence[str] = REQUIRED_IMPORTS,
     expected_paths: Sequence[ExpectedPath] = EXPECTED_REPO_PATHS,
     find_spec: FindSpec = importlib.util.find_spec,
+    live_db: bool = False,
+    database_connector: DatabaseConnector | None = None,
 ) -> tuple[CheckResult, ...]:
     environment = os.environ if env is None else env
     normalized_root = root.resolve()
@@ -89,6 +100,13 @@ def collect_checks(
     results.extend(_check_commands(required_commands, environment))
     results.extend(_check_imports(required_imports, find_spec))
     results.extend(_check_environment(environment))
+    if live_db:
+        results.append(
+            _check_live_database(
+                environment,
+                connector=database_connector or _connect_database,
+            )
+        )
     results.extend(_check_paths(normalized_root, expected_paths))
     return tuple(results)
 
@@ -121,8 +139,8 @@ def format_results(results: Sequence[CheckResult]) -> str:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    parse_args(argv)
-    results = collect_checks()
+    args = parse_args(argv)
+    results = collect_checks(live_db=args.live_db)
     output = format_results(results)
     if exit_code(results) == 0:
         print(output)
@@ -222,6 +240,54 @@ def _check_optional_secret_presence(
     if env.get(name):
         return CheckResult("ok", f"environment {name}", "set; value hidden")
     return CheckResult("warning", f"environment {name}", f"not set; {detail}")
+
+
+def _check_live_database(
+    env: Mapping[str, str],
+    *,
+    connector: DatabaseConnector,
+) -> CheckResult:
+    database_url = env.get("DATABASE_URL")
+    if not database_url:
+        return CheckResult(
+            "error",
+            "database connectivity",
+            "DATABASE_URL is not set; cannot verify Postgres readiness",
+        )
+    try:
+        with connector(database_url) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute("SELECT 1")
+                row = cursor.fetchone()
+    except Exception as exc:  # noqa: BLE001 - sanitize and report readiness failure.
+        return CheckResult(
+            "error",
+            "database connectivity",
+            _redact_message(str(exc), env) or "connection failed",
+        )
+
+    if row is None or row[0] != 1:
+        return CheckResult(
+            "error",
+            "database connectivity",
+            "SELECT 1 returned an unexpected result",
+        )
+    return CheckResult("ok", "database connectivity", "Postgres SELECT 1 passed")
+
+
+def _connect_database(database_url: str) -> ContextManager[Any]:
+    import psycopg
+
+    return psycopg.connect(database_url, connect_timeout=5)
+
+
+def _redact_message(message: str, env: Mapping[str, str]) -> str:
+    redacted = message
+    for name in ("DATABASE_URL", "FMP_API_KEY", "LINEAR_API_KEY"):
+        value = env.get(name)
+        if value:
+            redacted = redacted.replace(value, "<redacted>")
+    return redacted.splitlines()[0] if redacted else redacted
 
 
 def _check_paths(

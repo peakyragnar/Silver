@@ -266,6 +266,24 @@ def test_preflight_reports_missing_required_environment(tmp_path: Path) -> None:
     assert objective_run.preflight_passed(result) is False
 
 
+def test_preflight_runs_project_adapter_checks(tmp_path: Path) -> None:
+    config = replace(
+        _config(tmp_path, apply=True),
+        preflight_project_checks=(
+            "{python} -c 'import sys; sys.exit(0)'",
+            "{python} -c 'print(\"FAIL: live DB is not reachable\"); "
+            "import sys; sys.exit(1)'",
+        ),
+    )
+
+    result = objective_run.run_preflight(config, env=os.environ)
+
+    assert result.checks[-2].status == "ok"
+    assert result.checks[-2].message == "passed"
+    assert result.checks[-1].status == "error"
+    assert result.checks[-1].message == "FAIL: live DB is not reachable"
+
+
 def test_safety_dry_run_stops_before_dispatch(tmp_path: Path) -> None:
     ledger = tmp_path / "ledger.db"
     _write_minimal_ledger(ledger, status="Ready")
@@ -354,6 +372,7 @@ def _config(
         preflight_required_env=(),
         preflight_required_commands=(),
         preflight_required_auth=(),
+        preflight_project_checks=(),
         proof_packet_dir=tmp_path / "proof_packets",
         validation_commands=("python -m pytest",),
         output_format="text",

@@ -44,6 +44,8 @@ project_adapter:
       - gh
     required_auth:
       - github_cli
+    required_checks:
+      - "{python} scripts/check_phase1_environment.py --check --live-db"
   validation:
     required:
       - git diff --check

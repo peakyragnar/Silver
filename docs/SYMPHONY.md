@@ -218,8 +218,10 @@ write one final objective proof packet in apply mode
 
 Normal apply mode is the bounded watch path configured in
 `config/agentic_build.yaml`. It preflights `DATABASE_URL`, `FMP_API_KEY`,
-`LINEAR_API_KEY`, `gh`, and `gh auth status`, then cycles until blocked,
-complete, or `max_cycles` is reached:
+`LINEAR_API_KEY`, `gh`, `gh auth status`, and the Silver project-adapter
+readiness command before dispatch. The Silver adapter currently runs
+`scripts/check_phase1_environment.py --check --live-db`, so a set-but-invalid
+`DATABASE_URL` stops before Linear/Symphony receives work.
 
 ```bash
 set -a

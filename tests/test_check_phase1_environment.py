@@ -116,6 +116,90 @@ def test_set_optional_secret_is_reported_without_printing_value(
     assert fmp_api_key not in rendered
 
 
+def test_live_database_check_passes_without_printing_url(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bin_dir = _fake_executable(tmp_path, "psql")
+    database_url = "postgresql://user:secret@localhost:5432/silver"
+
+    monkeypatch.setenv("PATH", str(bin_dir))
+    monkeypatch.setenv("DATABASE_URL", database_url)
+
+    results = check_phase1_environment.collect_checks(
+        root=tmp_path,
+        env=os.environ,
+        required_imports=(),
+        expected_paths=(),
+        live_db=True,
+        database_connector=lambda _: _FakeConnection(1),
+    )
+
+    rendered = check_phase1_environment.format_results(results)
+    assert check_phase1_environment.exit_code(results) == 0
+    assert "OK: database connectivity: Postgres SELECT 1 passed" in rendered
+    assert database_url not in rendered
+
+
+def test_live_database_check_sanitizes_connection_failures(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bin_dir = _fake_executable(tmp_path, "psql")
+    database_url = "postgresql://user:secret@localhost:5432/silver"
+
+    monkeypatch.setenv("PATH", str(bin_dir))
+    monkeypatch.setenv("DATABASE_URL", database_url)
+
+    def failing_connector(_: str) -> object:
+        raise RuntimeError(f"could not connect to {database_url}")
+
+    results = check_phase1_environment.collect_checks(
+        root=tmp_path,
+        env=os.environ,
+        required_imports=(),
+        expected_paths=(),
+        live_db=True,
+        database_connector=failing_connector,
+    )
+
+    rendered = check_phase1_environment.format_results(results)
+    assert check_phase1_environment.exit_code(results) == 1
+    assert "FAIL: database connectivity: could not connect to <redacted>" in rendered
+    assert database_url not in rendered
+
+
+class _FakeConnection:
+    def __init__(self, value: int) -> None:
+        self.value = value
+
+    def __enter__(self) -> "_FakeConnection":
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        return None
+
+    def cursor(self) -> "_FakeCursor":
+        return _FakeCursor(self.value)
+
+
+class _FakeCursor:
+    def __init__(self, value: int) -> None:
+        self.value = value
+
+    def __enter__(self) -> "_FakeCursor":
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        return None
+
+    def execute(self, sql: str) -> None:
+        assert sql == "SELECT 1"
+
+    def fetchone(self) -> tuple[int]:
+        return (self.value,)
+
+
 def _fake_executable(tmp_path: Path, name: str) -> Path:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()

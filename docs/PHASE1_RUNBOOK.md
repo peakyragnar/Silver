@@ -38,6 +38,14 @@ python scripts/check_phase1_environment.py --check
 Optional `FMP_API_KEY` warnings are expected before live price ingest. Any
 `FAIL` line is a hard prerequisite to fix before starting a long run.
 
+Before a live Phase 1 run, add the live database readiness check. This executes
+a sanitized `SELECT 1` against `DATABASE_URL` and still hides connection
+details:
+
+```bash
+python scripts/check_phase1_environment.py --check --live-db
+```
+
 With `FMP_API_KEY` unset, a healthy local setup ends like this:
 
 ```text
@@ -54,6 +62,7 @@ already exists.
 ```bash
 createdb silver
 python scripts/bootstrap_database.py --check
+python scripts/check_phase1_environment.py --check --live-db
 python scripts/bootstrap_database.py
 ```
 
@@ -155,6 +164,7 @@ comparison, and reproducibility metadata.
 | `DATABASE_URL is required` | DB-backed commands do not know which database to use. | Export `DATABASE_URL` or pass `--database-url`. |
 | `FMP_API_KEY is required unless --check or --dry-run is used` | Live FMP price ingest needs a vendor key. | Export `FMP_API_KEY`, or use `--check`/`--dry-run`. |
 | `psycopg is required` or `Python import psycopg: unavailable` | The active Python environment is missing project dependencies. | Run `uv sync --locked --group dev --python 3.10` and activate `.venv`. |
+| `database connectivity` fails | `DATABASE_URL` is present but Postgres rejected or could not reach it. | Fix the database URL, user/role, password, host, or database before running live pipeline commands. |
 | `If the schema is missing, run python scripts/bootstrap_database.py first` | The database is reachable but not bootstrapped for Silver. | Run the bootstrap commands in section 2. |
 | `feature definition momentum_12_1 is not persisted` | Momentum feature materialization has not written its metadata yet. | Run `python scripts/materialize_momentum_12_1.py --universe falsifier_seed`. |
 | `no persisted momentum_12_1 feature values exist` | Feature rows are missing for the requested universe. | Re-run momentum feature materialization after price ingest. |
