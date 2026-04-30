@@ -155,11 +155,11 @@ FROM silver.universe_membership membership
 JOIN silver.securities security
     ON security.id = membership.security_id
 WHERE membership.universe_name = %(universe_name)s
-  AND (%(end_date)s IS NULL OR membership.valid_from <= %(end_date)s)
+  AND (%(end_date)s::date IS NULL OR membership.valid_from <= %(end_date)s::date)
   AND (
-      %(start_date)s IS NULL
+      %(start_date)s::date IS NULL
       OR membership.valid_to IS NULL
-      OR membership.valid_to >= %(start_date)s
+      OR membership.valid_to >= %(start_date)s::date
   )
 ORDER BY security.ticker, membership.valid_from;
 """.strip()

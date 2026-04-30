@@ -11,7 +11,9 @@ from typing import Protocol
 from silver.features.momentum_12_1 import (
     DAILY_PRICE_POLICY_NAME,
     DAILY_PRICE_POLICY_VERSION,
+    LONG_LOOKBACK_SESSIONS,
     MOMENTUM_12_1_DEFINITION,
+    SKIP_RECENT_SESSIONS,
     AdjustedDailyPriceObservation,
     NumericFeatureDefinition,
     compute_momentum_12_1,
@@ -103,11 +105,14 @@ def materialize_momentum_12_1(
     end_date: date | None,
     computed_by_run_id: int,
     dry_run: bool = False,
+    available_at_cutoff: datetime | None = None,
 ) -> MomentumMaterializationSummary:
     """Compute and persist eligible 12-1 momentum feature values."""
     _validate_date_bounds(start_date=start_date, end_date=end_date)
     if computed_by_run_id <= 0:
         raise FeatureStoreError("computed_by_run_id must be a positive integer")
+    cutoff = available_at_cutoff or datetime.now(timezone.utc)
+    _require_aware(cutoff, "available_at_cutoff")
 
     definition = repository.ensure_feature_definition(
         MOMENTUM_12_1_DEFINITION,
@@ -131,7 +136,7 @@ def materialize_momentum_12_1(
         end_date=end_date,
         available_at_policy_id=policy.id,
     )
-    prices_by_security = _prices_by_security(prices)
+    price_lookup_by_security = _price_lookup_by_security(prices)
     price_dates = [price.price_date for _, price in prices]
     effective_start_date = start_date or (min(price_dates) if price_dates else None)
     effective_end_date = end_date or (max(price_dates) if price_dates else None)
@@ -142,21 +147,38 @@ def materialize_momentum_12_1(
         calendar_rows=calendar.rows,
         start_date=effective_start_date,
         end_date=effective_end_date,
+        available_at_cutoff=cutoff,
+    )
+    candidate_windows = _candidate_windows(
+        calendar_rows=calendar.rows,
+        candidate_dates=candidate_dates,
     )
 
     writes: list[FeatureValueWrite] = []
     skipped: Counter[str] = Counter()
     eligible_security_dates = 0
     for asof_date in candidate_dates:
+        window = candidate_windows[asof_date]
         asof = daily_price_available_at(asof_date).astimezone(timezone.utc)
         for membership in memberships:
             if not membership.is_active_on(asof_date):
                 continue
             eligible_security_dates += 1
+            if window is None:
+                skipped["insufficient_history"] += 1
+                continue
+            start_date, end_date = window
+            security_prices = price_lookup_by_security.get(membership.security_id, {})
+            boundary_prices = tuple(
+                price
+                for price_date in (start_date, end_date)
+                for price in [security_prices.get(price_date)]
+                if price is not None
+            )
             result = compute_momentum_12_1(
                 security_id=membership.security_id,
                 asof=asof,
-                prices=prices_by_security.get(membership.security_id, ()),
+                prices=boundary_prices,
                 calendar=calendar,
             )
             if result.status != "ok" or result.value is None:
@@ -205,16 +227,15 @@ def materialize_momentum_12_1(
     )
 
 
-def _prices_by_security(
+def _price_lookup_by_security(
     rows: Sequence[tuple[int, AdjustedDailyPriceObservation]],
-) -> dict[int, tuple[AdjustedDailyPriceObservation, ...]]:
-    grouped: defaultdict[int, list[AdjustedDailyPriceObservation]] = defaultdict(list)
+) -> dict[int, dict[date, AdjustedDailyPriceObservation]]:
+    grouped: defaultdict[int, dict[date, AdjustedDailyPriceObservation]] = defaultdict(
+        dict
+    )
     for security_id, price in rows:
-        grouped[security_id].append(price)
-    return {
-        security_id: tuple(sorted(prices, key=lambda price: price.price_date))
-        for security_id, prices in grouped.items()
-    }
+        grouped[security_id][price.price_date] = price
+    return dict(grouped)
 
 
 def _candidate_asof_dates(
@@ -222,6 +243,7 @@ def _candidate_asof_dates(
     calendar_rows: Sequence[TradingCalendarRow],
     start_date: date | None,
     end_date: date | None,
+    available_at_cutoff: datetime,
 ) -> tuple[date, ...]:
     return tuple(
         row.date
@@ -229,7 +251,31 @@ def _candidate_asof_dates(
         if row.is_session
         and (start_date is None or row.date >= start_date)
         and (end_date is None or row.date <= end_date)
+        and daily_price_available_at(row.date).astimezone(timezone.utc)
+        <= available_at_cutoff
     )
+
+
+def _candidate_windows(
+    *,
+    calendar_rows: Sequence[TradingCalendarRow],
+    candidate_dates: Sequence[date],
+) -> dict[date, tuple[date, date] | None]:
+    session_dates = tuple(row.date for row in calendar_rows if row.is_session)
+    session_index = {
+        session_date: index for index, session_date in enumerate(session_dates)
+    }
+    windows: dict[date, tuple[date, date] | None] = {}
+    for candidate_date in candidate_dates:
+        index = session_index[candidate_date]
+        if index < LONG_LOOKBACK_SESSIONS:
+            windows[candidate_date] = None
+            continue
+        windows[candidate_date] = (
+            session_dates[index - LONG_LOOKBACK_SESSIONS],
+            session_dates[index - SKIP_RECENT_SESSIONS],
+        )
+    return windows
 
 
 def _source_metadata(
@@ -265,3 +311,8 @@ def _validate_date_bounds(*, start_date: date | None, end_date: date | None) -> 
         raise FeatureStoreError("end_date must be a date")
     if start_date is not None and end_date is not None and end_date < start_date:
         raise FeatureStoreError("end_date must be on or after start_date")
+
+
+def _require_aware(value: datetime, field_name: str) -> None:
+    if value.tzinfo is None or value.utcoffset() is None:
+        raise FeatureStoreError(f"{field_name} must be timezone-aware")

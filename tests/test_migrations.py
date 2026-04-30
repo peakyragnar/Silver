@@ -186,7 +186,7 @@ def test_backtest_metadata_replay_constraints_migration_static_expectations() ->
     sql = apply_migrations._normalize_sql(replay.sql)
 
     assert replay.path.name == "005_backtest_metadata_replay_constraints.sql"
-    assert len(migrations) == 5
+    assert len(migrations) >= 5
     for snippet in apply_migrations.PHASE2_BACKTEST_METADATA_REPLAY_REQUIRED_SNIPPETS:
         assert snippet in sql
 
@@ -194,3 +194,14 @@ def test_backtest_metadata_replay_constraints_migration_static_expectations() ->
     assert "model_runs_policy_versions_nonempty" in sql
     assert "backtest_runs_succeeded_claim_payloads_nonempty" in sql
     assert sql.count("not valid") == 5
+
+
+def test_analytics_run_kind_expansion_migration_allows_falsifier_invocations() -> None:
+    migrations = apply_migrations.check_migrations(ROOT / "db" / "migrations")
+    migration = migrations[5]
+    sql = apply_migrations._normalize_sql(migration.sql)
+
+    assert migration.path.name == "006_expand_analytics_run_kinds.sql"
+    assert "drop constraint analytics_runs_run_kind_check" in sql
+    assert "add constraint analytics_runs_run_kind_check" in sql
+    assert "'falsifier_report_invocation'" in sql

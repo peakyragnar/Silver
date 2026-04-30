@@ -167,6 +167,50 @@ def test_report_run_creates_and_finishes_model_and_backtest_success(
     assert "No label-scramble evidence supplied" not in report_text
 
 
+def test_load_policy_versions_uses_joined_feature_and_label_rows() -> None:
+    client = FakePolicyVersionClient(
+        {
+            "policy_versions": {"daily_price": 1, "benchmark_price": 2},
+            "policy_name_count": 2,
+            "policy_pair_count": 2,
+        }
+    )
+
+    policies = cli._load_policy_versions(
+        client,
+        feature_definition_id=17,
+        horizon=63,
+        universe="falsifier_seed",
+    )
+
+    assert policies == {"benchmark_price": 2, "daily_price": 1}
+    sql = client.sql
+    assert "fv.available_at_policy_id" in sql
+    assert "frl.available_at_policy_id" in sql
+    assert "WHERE fv.feature_definition_id = 17" in sql
+    assert "frl.horizon_days = 63" in sql
+    assert "um.universe_name = 'falsifier_seed'" in sql
+    assert "FROM silver.available_at_policies\nWHERE valid_to IS NULL" not in sql
+
+
+def test_load_policy_versions_rejects_conflicting_versions_for_same_policy() -> None:
+    client = FakePolicyVersionClient(
+        {
+            "policy_versions": {"daily_price": 2},
+            "policy_name_count": 1,
+            "policy_pair_count": 2,
+        }
+    )
+
+    with pytest.raises(cli.FalsifierCliError, match="conflicting available_at"):
+        cli._load_policy_versions(
+            client,
+            feature_definition_id=17,
+            horizon=63,
+            universe="falsifier_seed",
+        )
+
+
 def test_model_run_create_uses_stable_key_for_same_frozen_metadata(
     tmp_path: Path,
 ) -> None:
@@ -1004,3 +1048,13 @@ class FakeInvocationRepository:
             run_kind=self.creates[0]["run_kind"],
             status=status,
         )
+
+
+class FakePolicyVersionClient:
+    def __init__(self, payload: dict[str, Any]) -> None:
+        self.payload = payload
+        self.sql = ""
+
+    def fetch_json(self, sql: str) -> Any:
+        self.sql = sql
+        return self.payload

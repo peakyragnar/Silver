@@ -123,7 +123,20 @@ Keep Phase 1 narrow. Text features, hypothesis generation, paper trading, and
 portfolio execution are intentionally deferred until the falsifier harness is
 honest.
 
+2026-04-30 review follow-up: close two lineage gaps before further Phase 1
+claims: failed FMP price ingests must not publish usable normalized rows, and
+falsifier available-at policy metadata must be derived from the joined input
+rows rather than globally active policies.
+
 ARR-24 added the first in-memory walk-forward `momentum_12_1` runner with
 point-in-time label availability checks, transaction-cost assumptions, and a
 numeric momentum-rank baseline. The final falsifier report command,
 label-scramble test, and full regime breakdown remain separate follow-up work.
+
+2026-04-30 live proof update: the Phase 1 live path has produced
+`reports/falsifier/week_1_momentum.md` from persisted FMP prices, forward
+labels, and `momentum_12_1` feature values. The report status is `succeeded`
+with `model_run_id=2` and `backtest_run_id=2`. The run also exposed and fixed
+live-only contract gaps around the current FMP stable endpoint, nullable
+Postgres date parameters, future-available price rows, feature materialization
+cycle time, and the `falsifier_report_invocation` analytics run kind.

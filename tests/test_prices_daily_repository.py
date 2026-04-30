@@ -107,6 +107,26 @@ def test_write_daily_prices_is_idempotent_for_same_lineage() -> None:
     assert stored["close"] == Decimal("185.64")
 
 
+def test_write_daily_prices_upsert_relinks_identical_rows_to_new_run() -> None:
+    connection = FakeConnection()
+    repository = DailyPriceRepository(connection)
+    row = _price_row(date(2024, 1, 2), close="185.64")
+
+    repository.write_daily_prices([row], **WRITE_KWARGS)
+    retry_kwargs = dict(WRITE_KWARGS)
+    retry_kwargs["normalized_by_run_id"] = 30
+    repository.write_daily_prices([row], **retry_kwargs)
+
+    [stored] = connection.prices_daily.values()
+    assert stored["normalized_by_run_id"] == 30
+    insert_sql = next(
+        sql
+        for sql, _params in reversed(connection.executed)
+        if sql.startswith("INSERT INTO silver.prices_daily")
+    )
+    assert "silver.prices_daily.normalized_by_run_id IS DISTINCT FROM" in insert_sql
+
+
 @pytest.mark.parametrize(
     ("kwargs", "error"),
     (

@@ -18,7 +18,7 @@ from silver.sources.fmp import (
 
 
 def test_historical_prices_builds_stable_request_and_captures_raw_response() -> None:
-    payload = b'{"symbol":"AAPL","historical":[]}\n'
+    payload = b"[]\n"
     transport = FakeTransport(
         [
             FMPTransportResponse(
@@ -47,16 +47,16 @@ def test_historical_prices_builds_stable_request_and_captures_raw_response() -> 
 
     assert transport.calls == [
         (
-            "https://financialmodelingprep.com/api/v3/"
-            "historical-price-full/AAPL?apikey=real-secret&from=2024-01-01"
-            "&to=2024-01-31",
+            "https://financialmodelingprep.com/stable/"
+            "historical-price-eod/dividend-adjusted?apikey=real-secret"
+            "&from=2024-01-01&symbol=AAPL&to=2024-01-31",
             12.5,
         )
     ]
     assert result.body == payload
     assert result.http_status == 200
     assert result.content_type == "application/json"
-    assert result.endpoint == "/api/v3/historical-price-full/AAPL"
+    assert result.endpoint == "/stable/historical-price-eod/dividend-adjusted"
     assert result.fetched_at == fetched_at
     assert result.request_params == {
         "apikey": REDACTED_VALUE,
@@ -67,7 +67,7 @@ def test_historical_prices_builds_stable_request_and_captures_raw_response() -> 
 
     [row] = connection.rows
     assert row["vendor"] == "fmp"
-    assert row["endpoint"] == "/api/v3/historical-price-full/AAPL"
+    assert row["endpoint"] == "/stable/historical-price-eod/dividend-adjusted"
     assert row["params"] == result.request_params
     assert row["body_raw"] == payload
     assert "real-secret" not in row["request_url"]
@@ -146,7 +146,7 @@ def test_terminal_non_2xx_response_is_raw_vaulted_before_http_error() -> None:
         )
 
     assert exc_info.value.status_code == 404
-    assert exc_info.value.endpoint == "/api/v3/historical-price-full/AAPL"
+    assert exc_info.value.endpoint == "/stable/historical-price-eod/dividend-adjusted"
     assert exc_info.value.body == payload
 
     [row] = connection.rows

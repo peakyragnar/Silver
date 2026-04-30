@@ -91,6 +91,36 @@ def test_materialize_momentum_skips_and_reports_insufficient_history() -> None:
     assert not repository.feature_values
 
 
+def test_materialize_momentum_excludes_asof_dates_not_available_at_cutoff() -> None:
+    calendar_rows, sessions = _calendar_rows(date(2023, 1, 3), session_count=253)
+    asof_date = sessions[-1]
+    repository = FakeMomentumRepository(
+        calendar_rows=calendar_rows,
+        prices={
+            SECURITY_ID: [
+                _price(sessions[-253], "100.00"),
+                _price(sessions[-22], "125.00"),
+            ]
+        },
+    )
+    cutoff = daily_price_available_at(asof_date).astimezone(timezone.utc) - timedelta(
+        seconds=1
+    )
+
+    summary = materialize_momentum_12_1(
+        repository,
+        universe_name="falsifier_seed",
+        start_date=asof_date,
+        end_date=asof_date,
+        computed_by_run_id=77,
+        available_at_cutoff=cutoff,
+    )
+
+    assert summary.eligible_security_dates == 0
+    assert summary.values_written == 0
+    assert not repository.feature_values
+
+
 def test_materialize_momentum_check_command_is_offline() -> None:
     result = subprocess.run(
         [

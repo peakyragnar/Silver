@@ -568,11 +568,14 @@ WITH member_securities AS (
     SELECT DISTINCT security_id
     FROM silver.universe_membership
     WHERE universe_name = %(universe_name)s
-      AND (%(label_end_date)s IS NULL OR valid_from <= %(label_end_date)s)
       AND (
-          %(label_start_date)s IS NULL
+          %(label_end_date)s::date IS NULL
+          OR valid_from <= %(label_end_date)s::date
+      )
+      AND (
+          %(label_start_date)s::date IS NULL
           OR valid_to IS NULL
-          OR valid_to >= %(label_start_date)s
+          OR valid_to >= %(label_start_date)s::date
       )
 )
 SELECT
@@ -589,12 +592,15 @@ SELECT
     p.available_at,
     p.available_at_policy_id
 FROM silver.prices_daily AS p
+JOIN silver.analytics_runs AS run
+  ON run.id = p.normalized_by_run_id
 JOIN silver.securities AS s
   ON s.id = p.security_id
 JOIN member_securities AS m
   ON m.security_id = p.security_id
-WHERE (%(price_start_date)s IS NULL OR p.date >= %(price_start_date)s)
-  AND (%(price_end_date)s IS NULL OR p.date <= %(price_end_date)s)
+WHERE run.status = 'succeeded'
+  AND (%(price_start_date)s::date IS NULL OR p.date >= %(price_start_date)s::date)
+  AND (%(price_end_date)s::date IS NULL OR p.date <= %(price_end_date)s::date)
 ORDER BY s.ticker, p.date;
 """.strip()
 
@@ -613,24 +619,30 @@ SELECT
     p.available_at,
     p.available_at_policy_id
 FROM silver.prices_daily AS p
+JOIN silver.analytics_runs AS run
+  ON run.id = p.normalized_by_run_id
 JOIN silver.securities AS s
   ON s.id = p.security_id
-WHERE upper(s.ticker) = upper(%(ticker)s)
-  AND (%(price_start_date)s IS NULL OR p.date >= %(price_start_date)s)
-  AND (%(price_end_date)s IS NULL OR p.date <= %(price_end_date)s)
+WHERE run.status = 'succeeded'
+  AND upper(s.ticker) = upper(%(ticker)s)
+  AND (%(price_start_date)s::date IS NULL OR p.date >= %(price_start_date)s::date)
+  AND (%(price_end_date)s::date IS NULL OR p.date <= %(price_end_date)s::date)
 ORDER BY p.date;
 """.strip()
 
 _SELECT_LABEL_DATES_SQL = """
 SELECT DISTINCT p.security_id, p.date
 FROM silver.prices_daily AS p
+JOIN silver.analytics_runs AS run
+  ON run.id = p.normalized_by_run_id
 JOIN silver.universe_membership AS um
   ON um.security_id = p.security_id
  AND um.universe_name = %(universe_name)s
  AND um.valid_from <= p.date
  AND (um.valid_to IS NULL OR um.valid_to >= p.date)
-WHERE (%(label_start_date)s IS NULL OR p.date >= %(label_start_date)s)
-  AND (%(label_end_date)s IS NULL OR p.date <= %(label_end_date)s)
+WHERE run.status = 'succeeded'
+  AND (%(label_start_date)s::date IS NULL OR p.date >= %(label_start_date)s::date)
+  AND (%(label_end_date)s::date IS NULL OR p.date <= %(label_end_date)s::date)
 ORDER BY p.security_id, p.date;
 """.strip()
 

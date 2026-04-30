@@ -484,7 +484,12 @@ def load_persisted_inputs(
         universe_members=universe_members,
         feature_definition=feature_definition,
         rows=rows,
-        available_at_policy_versions=_load_policy_versions(client),
+        available_at_policy_versions=_load_policy_versions(
+            client,
+            feature_definition_id=feature_definition.id,
+            horizon=horizon,
+            universe=universe,
+        ),
         target_kind=target_kind,
     )
 
@@ -1233,17 +1238,90 @@ FROM joined_rows;
     )
 
 
-def _load_policy_versions(client: PsqlJsonClient) -> Mapping[str, int]:
+def _load_policy_versions(
+    client: PsqlJsonClient,
+    *,
+    feature_definition_id: int,
+    horizon: int,
+    universe: str,
+) -> Mapping[str, int]:
+    normalized_feature_definition_id = _sql_positive_int(
+        feature_definition_id,
+        "feature_definition_id",
+    )
+    normalized_horizon = _sql_positive_int(horizon, "horizon")
+    normalized_universe = _sql_required_str(universe, "universe")
     rows = client.fetch_json(
-        """
-SELECT COALESCE(jsonb_object_agg(name, version), '{}'::jsonb)::text
-FROM silver.available_at_policies
-WHERE valid_to IS NULL;
+        f"""
+WITH universe_rows AS (
+    SELECT s.id AS security_id, um.valid_from, um.valid_to
+    FROM silver.universe_membership um
+    JOIN silver.securities s ON s.id = um.security_id
+    WHERE um.universe_name = {_sql_literal(normalized_universe)}
+),
+joined_rows AS (
+    SELECT
+        fv.available_at_policy_id AS feature_available_at_policy_id,
+        frl.available_at_policy_id AS label_available_at_policy_id
+    FROM silver.feature_values fv
+    JOIN silver.forward_return_labels frl
+      ON frl.security_id = fv.security_id
+     AND frl.label_date = fv.asof_date
+     AND frl.horizon_days = {normalized_horizon}
+    JOIN universe_rows u
+      ON u.security_id = fv.security_id
+     AND fv.asof_date >= u.valid_from
+     AND (u.valid_to IS NULL OR fv.asof_date <= u.valid_to)
+    WHERE fv.feature_definition_id = {normalized_feature_definition_id}
+),
+policy_ids AS (
+    SELECT feature_available_at_policy_id AS available_at_policy_id
+    FROM joined_rows
+    UNION
+    SELECT label_available_at_policy_id AS available_at_policy_id
+    FROM joined_rows
+),
+policy_rows AS (
+    SELECT DISTINCT policy.name, policy.version
+    FROM silver.available_at_policies AS policy
+    JOIN policy_ids
+      ON policy_ids.available_at_policy_id = policy.id
+)
+SELECT jsonb_build_object(
+    'policy_versions',
+    COALESCE(
+        (SELECT jsonb_object_agg(name, version ORDER BY name) FROM policy_rows),
+        '{{}}'::jsonb
+    ),
+    'policy_name_count',
+    (SELECT count(DISTINCT name) FROM policy_rows),
+    'policy_pair_count',
+    (SELECT count(*) FROM policy_rows)
+)::text;
 """.strip()
     )
     if not isinstance(rows, Mapping):
         raise FalsifierCliError("available_at policy versions query returned non-object")
-    return {str(key): int(value) for key, value in rows.items()}
+    policy_versions = rows.get("policy_versions")
+    if not isinstance(policy_versions, Mapping):
+        raise FalsifierCliError(
+            "available_at policy versions query returned missing policy_versions"
+        )
+    policy_name_count = _required_int(rows, "policy_name_count")
+    policy_pair_count = _required_int(rows, "policy_pair_count")
+    if policy_pair_count != policy_name_count:
+        raise FalsifierCliError(
+            "conflicting available_at policy versions found in joined falsifier "
+            "input rows"
+        )
+    if not policy_versions:
+        raise FalsifierCliError(
+            "available_at policy versions query returned no joined input policies"
+        )
+    return {
+        str(key): int(value)
+        for key, value in sorted(policy_versions.items(), key=lambda item: str(item[0]))
+    }
 
 
 def _load_run_identity(
@@ -1945,6 +2023,18 @@ def _feature_set_hash(feature: FeatureDefinitionRecord) -> str:
 
 def _sql_literal(value: str) -> str:
     return "'" + value.replace("'", "''") + "'"
+
+
+def _sql_positive_int(value: object, name: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        raise FalsifierCliError(f"{name} must be a positive integer")
+    return value
+
+
+def _sql_required_str(value: object, name: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise FalsifierCliError(f"{name} must be a non-empty string")
+    return value.strip()
 
 
 def _required_str(row: Mapping[str, Any], key: str) -> str:

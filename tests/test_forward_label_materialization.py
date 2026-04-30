@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import importlib.util
 import subprocess
 import sys
 from datetime import date, datetime, timedelta, timezone
@@ -20,6 +21,16 @@ from silver.time.trading_calendar import TradingCalendar, TradingCalendarRow
 
 
 ROOT = Path(__file__).resolve().parents[1]
+CLI_PATH = ROOT / "scripts" / "materialize_forward_labels.py"
+CLI_SPEC = importlib.util.spec_from_file_location(
+    "materialize_forward_labels_cli",
+    CLI_PATH,
+)
+assert CLI_SPEC is not None
+assert CLI_SPEC.loader is not None
+cli = importlib.util.module_from_spec(CLI_SPEC)
+sys.modules[CLI_SPEC.name] = cli
+CLI_SPEC.loader.exec_module(cli)
 
 
 def test_build_records_uses_target_price_availability_and_surfaces_skips() -> None:
@@ -115,6 +126,24 @@ def test_build_records_populates_benchmark_relative_fields_and_pit_availability(
         "target_price_available_at_policy_id": 4,
         "benchmark_forward_return": "0.02",
     }
+
+
+def test_filters_price_observations_that_are_not_available_yet() -> None:
+    cutoff = datetime(2026, 4, 30, 16, tzinfo=timezone.utc)
+    available = _price_observation(
+        date(2026, 4, 29),
+        adj_close="100",
+        available_hour=12,
+    )
+    unavailable = _price_observation(
+        date(2026, 4, 30),
+        adj_close="105",
+        available_hour=23,
+    )
+
+    filtered = cli._available_price_observations((available, unavailable), cutoff)
+
+    assert filtered == (available,)
 
 
 def test_build_records_marks_missing_benchmark_coverage_without_zero_fill() -> None:
@@ -218,8 +247,20 @@ def test_repository_loads_universe_prices_and_pit_label_dates() -> None:
     )
     assert "FROM silver.prices_daily AS p" in price_sql
     assert "FROM silver.universe_membership" in price_sql
+    assert "JOIN silver.analytics_runs AS run" in price_sql
+    assert "run.id = p.normalized_by_run_id" in price_sql
+    assert "run.status = 'succeeded'" in price_sql
+    assert "%(label_end_date)s::date IS NULL" in price_sql
+    assert "valid_to >= %(label_start_date)s::date" in price_sql
+    assert "%(price_start_date)s::date IS NULL" in price_sql
+    assert "p.date <= %(price_end_date)s::date" in price_sql
     assert "um.valid_from <= p.date" in label_dates_sql
     assert "um.valid_to IS NULL OR um.valid_to >= p.date" in label_dates_sql
+    assert "JOIN silver.analytics_runs AS run" in label_dates_sql
+    assert "run.id = p.normalized_by_run_id" in label_dates_sql
+    assert "run.status = 'succeeded'" in label_dates_sql
+    assert "%(label_start_date)s::date IS NULL" in label_dates_sql
+    assert "p.date <= %(label_end_date)s::date" in label_dates_sql
 
 
 def test_repository_loads_benchmark_prices_without_universe_membership() -> None:
@@ -239,7 +280,12 @@ def test_repository_loads_benchmark_prices_without_universe_membership() -> None
         sql for sql, params in connection.executed if params.get("ticker") == "SPY"
     )
     assert "FROM silver.prices_daily AS p" in benchmark_sql
-    assert "WHERE upper(s.ticker) = upper(%(ticker)s)" in benchmark_sql
+    assert "JOIN silver.analytics_runs AS run" in benchmark_sql
+    assert "run.id = p.normalized_by_run_id" in benchmark_sql
+    assert "run.status = 'succeeded'" in benchmark_sql
+    assert "AND upper(s.ticker) = upper(%(ticker)s)" in benchmark_sql
+    assert "%(price_start_date)s::date IS NULL" in benchmark_sql
+    assert "p.date <= %(price_end_date)s::date" in benchmark_sql
     assert "universe_membership" not in benchmark_sql
 
 

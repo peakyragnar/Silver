@@ -135,6 +135,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     ) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
+    except Exception as exc:  # noqa: BLE001 - CLI must fail without tracebacks.
+        print(f"error: {type(exc).__name__}: {exc}", file=sys.stderr)
+        return 1
 
     print(
         "OK: materialized "
@@ -160,6 +163,7 @@ def materialize_forward_labels(
     calendar = repository.load_trading_calendar()
     price_end_date = _price_end_date(calendar, end_date)
     benchmark_ticker = _normalize_optional_ticker(benchmark_ticker)
+    available_at_cutoff = datetime.now(timezone.utc)
 
     prices = repository.load_universe_price_observations(
         universe_name=universe_name,
@@ -167,6 +171,12 @@ def materialize_forward_labels(
         label_end_date=end_date,
         price_end_date=price_end_date,
     )
+    prices = _available_price_observations(prices, available_at_cutoff)
+    if not prices:
+        raise MaterializeForwardLabelsError(
+            "no price observations are available at or before "
+            f"{available_at_cutoff.isoformat()}"
+        )
     label_dates_by_security = repository.load_label_dates_by_security(
         universe_name=universe_name,
         label_start_date=start_date,
@@ -178,6 +188,10 @@ def materialize_forward_labels(
             ticker=benchmark_ticker,
             price_start_date=start_date,
             price_end_date=price_end_date,
+        )
+        benchmark_prices = _available_price_observations(
+            benchmark_prices,
+            available_at_cutoff,
         )
         if not benchmark_prices:
             raise MaterializeForwardLabelsError(
@@ -195,6 +209,7 @@ def materialize_forward_labels(
         "end_date": end_date,
         "horizons": CANONICAL_HORIZONS,
         "label_version": label_version,
+        "available_at_cutoff": available_at_cutoff.isoformat(),
     }
     if benchmark_ticker is not None:
         parameters["benchmark_ticker"] = benchmark_ticker
@@ -208,6 +223,7 @@ def materialize_forward_labels(
             benchmark_prices=benchmark_prices,
         ),
     )
+    _commit(connection)
 
     try:
         materialized = build_forward_label_records(
@@ -222,7 +238,9 @@ def materialize_forward_labels(
         write_result = repository.write_forward_labels(materialized.records)
         repository.finish_label_generation_run(run_id, status="succeeded")
     except Exception:
+        _rollback(connection)
         repository.finish_label_generation_run(run_id, status="failed")
+        _commit(connection)
         raise
 
     skipped_by_reason = Counter(skip.reason.value for skip in materialized.skipped)
@@ -234,6 +252,15 @@ def materialize_forward_labels(
             skipped_count=len(materialized.skipped),
         ),
         skipped_by_reason,
+    )
+
+
+def _available_price_observations(
+    prices: Sequence[ForwardLabelPriceObservation],
+    available_at_cutoff: datetime,
+) -> tuple[ForwardLabelPriceObservation, ...]:
+    return tuple(
+        price for price in prices if price.available_at <= available_at_cutoff
     )
 
 

@@ -176,13 +176,11 @@ class FMPClient:
         if start > end:
             raise FMPConfigurationError("start_date must be on or before end_date")
 
-        endpoint = (
-            "/api/v3/historical-price-full/"
-            f"{urllib.parse.quote(normalized_symbol, safe='')}"
-        )
+        endpoint = "/stable/historical-price-eod/dividend-adjusted"
         query_params = {
             "apikey": self._api_key,
             "from": start.isoformat(),
+            "symbol": normalized_symbol,
             "to": end.isoformat(),
         }
         vault_params = {

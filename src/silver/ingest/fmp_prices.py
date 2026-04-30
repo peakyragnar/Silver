@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from typing import Any
@@ -220,17 +220,13 @@ def _member_fingerprint(member: UniverseMember) -> dict[str, Any]:
     }
 
 
-def _json_payload(body: bytes, ticker: str) -> Mapping[str, Any]:
+def _json_payload(body: bytes, ticker: str) -> Any:
     try:
         payload = json.loads(body)
     except json.JSONDecodeError as exc:
         raise FmpPriceIngestError(
             f"FMP historical daily price response for {ticker} was not valid JSON"
         ) from exc
-    if not isinstance(payload, Mapping):
-        raise FmpPriceIngestError(
-            f"FMP historical daily price response for {ticker} must be a JSON object"
-        )
     return payload
 
 

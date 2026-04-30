@@ -7,7 +7,7 @@ import argparse
 import os
 import subprocess
 import sys
-from datetime import date
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Sequence
 
@@ -83,6 +83,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         psycopg = _load_psycopg()
         with psycopg.connect(args.database_url) as connection:
             repository = FeatureStoreRepository(connection)
+            available_at_cutoff = datetime.now(timezone.utc)
             if args.dry_run:
                 run_id = 1
             else:
@@ -106,21 +107,34 @@ def main(argv: Sequence[str] | None = None) -> int:
                             if args.end_date is not None
                             else None
                         ),
+                        "available_at_cutoff": available_at_cutoff.isoformat(),
                     },
                 )
+                connection.commit()
 
-            summary = materialize_momentum_12_1(
-                repository,
-                universe_name=args.universe,
-                start_date=args.start_date,
-                end_date=args.end_date,
-                computed_by_run_id=run_id,
-                dry_run=args.dry_run,
-            )
-            if not args.dry_run:
-                repository.finish_analytics_run(run_id=run_id, status="succeeded")
+            try:
+                summary = materialize_momentum_12_1(
+                    repository,
+                    universe_name=args.universe,
+                    start_date=args.start_date,
+                    end_date=args.end_date,
+                    computed_by_run_id=run_id,
+                    dry_run=args.dry_run,
+                    available_at_cutoff=available_at_cutoff,
+                )
+                if not args.dry_run:
+                    repository.finish_analytics_run(run_id=run_id, status="succeeded")
+            except Exception:
+                if not args.dry_run:
+                    connection.rollback()
+                    repository.finish_analytics_run(run_id=run_id, status="failed")
+                    connection.commit()
+                raise
     except FeatureStoreError as exc:
         print(f"error: {exc}", file=sys.stderr)
+        return 1
+    except Exception as exc:  # noqa: BLE001 - CLI must fail without tracebacks.
+        print(f"error: {type(exc).__name__}: {exc}", file=sys.stderr)
         return 1
 
     action = "would write" if args.dry_run else "wrote"

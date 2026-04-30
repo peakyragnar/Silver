@@ -635,8 +635,10 @@ violation.
 
 Fresh invocation metadata, if retained, is audit metadata outside deterministic
 run identity. It may be stored in an append-only `silver.analytics_runs` row
-with `run_kind = 'backtest'` and the resolved `model_run_key` /
-`backtest_run_key` in `parameters`, or in a later dedicated invocation table.
+with `run_kind = 'backtest'` for durable backtest execution or
+`run_kind = 'falsifier_report_invocation'` for report-generation audit
+metadata, including the resolved `model_run_key` / `backtest_run_key` in
+`parameters`, or in a later dedicated invocation table.
 It must not be written into the immutable `model_runs` or `backtest_runs`
 create payload for a deterministic key. The existing registry schema is
 sufficient for this contract; a schema change is required only if downstream

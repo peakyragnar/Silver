@@ -669,12 +669,15 @@ ORDER BY date;
 """.strip()
 
 _SELECT_ADJUSTED_PRICES_SQL = """
-SELECT security_id, date, adj_close, available_at
-FROM silver.prices_daily
-WHERE security_id = ANY(%(security_ids)s)
-  AND available_at_policy_id = %(available_at_policy_id)s
-  AND (%(end_date)s::date IS NULL OR date <= %(end_date)s::date)
-ORDER BY security_id, date;
+SELECT prices.security_id, prices.date, prices.adj_close, prices.available_at
+FROM silver.prices_daily AS prices
+JOIN silver.analytics_runs AS run
+  ON run.id = prices.normalized_by_run_id
+WHERE run.status = 'succeeded'
+  AND prices.security_id = ANY(%(security_ids)s)
+  AND prices.available_at_policy_id = %(available_at_policy_id)s
+  AND (%(end_date)s::date IS NULL OR prices.date <= %(end_date)s::date)
+ORDER BY prices.security_id, prices.date;
 """.strip()
 
 _UPSERT_FEATURE_VALUE_SQL = """

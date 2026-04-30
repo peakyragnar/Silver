@@ -94,6 +94,31 @@ def test_write_feature_values_uses_idempotent_upsert_shape() -> None:
     assert len(connection.feature_values) == 1
 
 
+def test_load_adjusted_prices_reads_only_succeeded_normalization_runs() -> None:
+    connection = FakeFeatureConnection()
+    repository = FeatureStoreRepository(connection)
+
+    rows = repository.load_adjusted_prices(
+        security_ids=(101,),
+        end_date=date(2024, 1, 2),
+        available_at_policy_id=3,
+    )
+
+    assert len(rows) == 1
+    security_id, price = rows[0]
+    assert security_id == 101
+    assert price.price_date == date(2024, 1, 2)
+    sql, params = connection.executed[-1]
+    assert params == {
+        "security_ids": [101],
+        "end_date": date(2024, 1, 2),
+        "available_at_policy_id": 3,
+    }
+    assert "JOIN silver.analytics_runs AS run" in sql
+    assert "run.id = prices.normalized_by_run_id" in sql
+    assert "run.status = 'succeeded'" in sql
+
+
 def _definition_row(*, definition_hash: str | None = None) -> dict[str, Any]:
     return {
         "id": 501,
@@ -115,6 +140,14 @@ class FakeFeatureConnection:
     ) -> None:
         self.definitions = definitions if definitions is not None else {}
         self.feature_values: dict[tuple[int, date, int], dict[str, Any]] = {}
+        self.adjusted_prices = [
+            {
+                "security_id": 101,
+                "date": date(2024, 1, 2),
+                "adj_close": "184.68",
+                "available_at": datetime(2024, 1, 2, 23, tzinfo=timezone.utc),
+            }
+        ]
         self.executed: list[tuple[str, dict[str, Any]]] = []
 
     def cursor(self) -> FakeFeatureCursor:
@@ -125,6 +158,7 @@ class FakeFeatureCursor:
     def __init__(self, connection: FakeFeatureConnection) -> None:
         self.connection = connection
         self._one: dict[str, Any] | None = None
+        self._many: list[dict[str, Any]] = []
 
     def __enter__(self) -> FakeFeatureCursor:
         return self
@@ -144,13 +178,16 @@ class FakeFeatureCursor:
         if sql.startswith("INSERT INTO silver.feature_values"):
             self._upsert_feature_value(params)
             return
+        if sql.startswith("SELECT prices.security_id, prices.date"):
+            self._many = list(self.connection.adjusted_prices)
+            return
         raise AssertionError(f"unexpected SQL: {sql}")
 
     def fetchone(self) -> dict[str, Any] | None:
         return self._one
 
     def fetchall(self) -> list[dict[str, Any]]:
-        return []
+        return self._many
 
     def _insert_definition(self, params: dict[str, Any]) -> None:
         key = (params["name"], params["version"])

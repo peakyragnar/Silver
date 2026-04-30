@@ -643,7 +643,7 @@ def _parse_date(value: str, field: str, context: str) -> date:
 
 def _nullable_date(value: date | None) -> str:
     if value is None:
-        return "NULL"
+        return "NULL::date"
     return _date_literal(value)
 
 
@@ -653,7 +653,7 @@ def _date_literal(value: date) -> str:
 
 def _nullable_text(value: str | None) -> str:
     if value is None:
-        return "NULL"
+        return "NULL::text"
     return _sql_literal(value)
 
 

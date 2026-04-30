@@ -75,6 +75,8 @@ def test_build_seed_sql_is_deterministic_idempotent_upsert() -> None:
     assert "ON CONFLICT (security_id, universe_name, valid_from)" in sql
     assert "IS DISTINCT FROM EXCLUDED" in sql
     assert "DELETE FROM" not in sql
+    assert "NULL::date" in sql
+    assert "NULL::text" in sql
     assert "'falsifier_seed'" in sql
 
 

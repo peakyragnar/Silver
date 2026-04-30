@@ -530,5 +530,7 @@ WHERE
     OR silver.prices_daily.available_at IS DISTINCT FROM EXCLUDED.available_at
     OR silver.prices_daily.available_at_policy_id IS DISTINCT FROM
         EXCLUDED.available_at_policy_id
-    OR silver.prices_daily.raw_object_id IS DISTINCT FROM EXCLUDED.raw_object_id;
+    OR silver.prices_daily.raw_object_id IS DISTINCT FROM EXCLUDED.raw_object_id
+    OR silver.prices_daily.normalized_by_run_id IS DISTINCT FROM
+        EXCLUDED.normalized_by_run_id;
 """.strip()

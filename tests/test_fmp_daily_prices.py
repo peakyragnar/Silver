@@ -50,6 +50,45 @@ def test_parse_historical_daily_prices_returns_typed_rows_from_fixture() -> None
     }
 
 
+def test_parse_stable_dividend_adjusted_prices_returns_typed_rows() -> None:
+    payload = [
+        {
+            "symbol": "AAPL",
+            "date": "2024-01-05",
+            "adjOpen": 180.11,
+            "adjHigh": 180.87,
+            "adjLow": 178.31,
+            "adjClose": 179.31,
+            "volume": 62379700,
+        },
+        {
+            "symbol": "AAPL",
+            "date": "2024-01-04",
+            "adjOpen": 180.28,
+            "adjHigh": 181.21,
+            "adjLow": 179.02,
+            "adjClose": 180.04,
+            "volume": 71983600,
+        },
+    ]
+
+    rows = parse_historical_daily_prices(payload)
+
+    assert [row.date.isoformat() for row in rows] == ["2024-01-04", "2024-01-05"]
+    assert {row.ticker for row in rows} == {"AAPL"}
+    assert rows[0].open == Decimal("180.28")
+    assert rows[0].high == Decimal("181.21")
+    assert rows[0].low == Decimal("179.02")
+    assert rows[0].close == Decimal("180.04")
+    assert rows[0].adj_close == Decimal("180.04")
+    assert rows[0].volume == 71983600
+    assert rows[0].raw_metadata == {
+        "price_adjustment": "dividend_adjusted",
+        "source_date": "2024-01-04",
+        "source_symbol": "AAPL",
+    }
+
+
 def test_parse_historical_daily_prices_rejects_missing_required_fields() -> None:
     payload = _fixture_payload()
     del payload["historical"][0]["adjClose"]
@@ -79,6 +118,35 @@ def test_parse_historical_daily_prices_rejects_bad_numeric_values(
     payload["historical"][0][field] = value
 
     with pytest.raises(FmpDailyPriceParseError, match=error):
+        parse_historical_daily_prices(payload)
+
+
+def test_parse_stable_dividend_adjusted_prices_rejects_symbol_mismatch() -> None:
+    payload = [
+        {
+            "symbol": "AAPL",
+            "date": "2024-01-05",
+            "adjOpen": 180.11,
+            "adjHigh": 180.87,
+            "adjLow": 178.31,
+            "adjClose": 179.31,
+            "volume": 62379700,
+        },
+        {
+            "symbol": "MSFT",
+            "date": "2024-01-04",
+            "adjOpen": 180.28,
+            "adjHigh": 181.21,
+            "adjLow": 179.02,
+            "adjClose": 180.04,
+            "volume": 71983600,
+        },
+    ]
+
+    with pytest.raises(
+        FmpDailyPriceParseError,
+        match=r"rows\[1\]\.symbol must be AAPL; got MSFT",
+    ):
         parse_historical_daily_prices(payload)
 
 
