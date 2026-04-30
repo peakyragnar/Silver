@@ -303,6 +303,53 @@ def test_backtest_replay_comparison_names_drifted_identity_field() -> None:
     )
 
 
+def test_backtest_replay_comparison_matches_identical_contract() -> None:
+    connection = FakeMetadataConnection()
+    repository = BacktestMetadataRepository(connection)
+    model = repository.create_model_run(_model_run_create())
+    backtest = repository.create_backtest_run(_backtest_run_create(model_run_id=model.id))
+    repository.finish_model_run(
+        model.id,
+        ModelRunFinish(status="succeeded", metrics={"split_count": 3}),
+    )
+    repository.finish_backtest_run(backtest.id, _backtest_run_finish())
+
+    stored = repository.load_backtest_replay_snapshot(backtest_run_id=backtest.id)
+
+    comparison = compare_backtest_replay_snapshots(stored, stored)
+
+    assert comparison.matches
+    assert comparison.mismatches == ()
+    assert comparison.stored_backtest_run_id == backtest.id
+    assert comparison.replayed_backtest_run_id == backtest.id
+
+
+def test_backtest_replay_comparison_ignores_surrogate_ids_for_same_stable_identity() -> None:
+    connection = FakeMetadataConnection()
+    repository = BacktestMetadataRepository(connection)
+    model = repository.create_model_run(_model_run_create())
+    backtest = repository.create_backtest_run(_backtest_run_create(model_run_id=model.id))
+    repository.finish_model_run(
+        model.id,
+        ModelRunFinish(status="succeeded", metrics={"split_count": 3}),
+    )
+    repository.finish_backtest_run(backtest.id, _backtest_run_finish())
+
+    stored = repository.load_backtest_replay_snapshot(backtest_run_id=backtest.id)
+    replayed = replace(
+        stored,
+        model_run_id=9001,
+        backtest_run_id=9002,
+        backtest_model_run_id=9001,
+    )
+
+    comparison = compare_backtest_replay_snapshots(stored, replayed)
+
+    assert comparison.matches
+    assert comparison.mismatches == ()
+    assert comparison.stored_backtest_run_key == comparison.replayed_backtest_run_key
+
+
 def test_traceability_snapshot_rejects_missing_backtest_run_id() -> None:
     connection = FakeMetadataConnection()
     repository = BacktestMetadataRepository(connection)

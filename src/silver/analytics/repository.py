@@ -1416,7 +1416,6 @@ _REPLAY_SNAPSHOT_COMPARISON_FIELDS = (
     ),
     ("model_runs.input_fingerprints", "model_input_fingerprints"),
     ("backtest_runs.backtest_run_key", "backtest_run_key"),
-    ("backtest_runs.model_run_id", "backtest_model_run_id"),
     ("backtest_runs.status", "backtest_status"),
     ("backtest_runs.universe_name", "backtest_universe_name"),
     ("backtest_runs.horizon_days", "backtest_horizon_days"),

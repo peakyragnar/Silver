@@ -156,6 +156,14 @@ Replay-from-run-id contract tests must cover the read side of that proof:
   derive deterministic identity from UUIDs, timestamps, process ids, host/user
   names, output paths, report paths, or database surrogate ids
 
+Deterministic replay comparison is covered by
+`test_backtest_replay_comparison_matches_identical_contract`,
+`test_backtest_replay_comparison_ignores_surrogate_ids_for_same_stable_identity`,
+and `test_backtest_replay_comparison_names_drifted_identity_field`. End-to-end
+CLI replay evidence is covered by
+`test_replay_run_uses_stored_plan_and_prints_match_evidence` and
+`test_replay_run_fails_with_mismatch_evidence`.
+
 ## Replay CLI Validation
 
 The operator replay path starts from a durable backtest identity, not from

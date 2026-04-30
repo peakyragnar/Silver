@@ -167,7 +167,7 @@ Expected Tickets:
   - `scripts/run_falsifier.py`
   - `docs/PHASE1_RUNBOOK.md`
   - `docs/TESTING.md`
-  - CLI tests
+  - `tests/test_run_falsifier_cli.py`
   Do Not Touch:
   - vendor ingest behavior
   - schema migrations unless explicitly proven necessary and non-destructive
@@ -221,6 +221,20 @@ Expected Tickets:
   - deterministic replay test name(s)
   - mismatch test name(s)
   - remaining gaps or skipped live checks
+
+  Direct Build Evidence (2026-04-30):
+  - Added `test_backtest_replay_comparison_matches_identical_contract`.
+  - Added `test_backtest_replay_comparison_ignores_surrogate_ids_for_same_stable_identity`.
+  - Existing drift guard: `test_backtest_replay_comparison_names_drifted_identity_field`.
+  - Existing CLI match guard: `test_replay_run_uses_stored_plan_and_prints_match_evidence`.
+  - Existing CLI mismatch guard: `test_replay_run_fails_with_mismatch_evidence`.
+  - RED/PROVE: temporarily restored `backtest_runs.model_run_id` comparison;
+    the surrogate-id replay test failed on that exact field, then passed after
+    the fix was restored.
+  - Validation: `git diff --check`; `python -m pytest
+    tests/test_backtest_metadata_repository.py tests/test_run_falsifier_cli.py
+    -q`; `python -m pytest`; `ruff check .`; `python
+    scripts/run_falsifier.py --check`.
 
 Validation:
 - `git diff --check`
