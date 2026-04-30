@@ -526,7 +526,12 @@ Current Silver MVP:
 - `scripts/integration_steward.py` turns `Rework` tickets into repair packets
   with PR URL, branch, blocker, allowed scope, protected paths, validation, and
   proof refresh requirements.
-- It does not perform automatic branch editing yet.
+- `scripts/integration_repair_runner.py` can prepare an isolated worktree,
+  merge current `main` into the PR branch, run an optional repair-agent command,
+  run validation, push the repaired branch, and move the ticket back to
+  `Merging`.
+- It does not force-push, rewrite history, or silently resolve semantic/safety
+  exceptions.
 
 ### Stage 7: Integration Steward MVP
 
@@ -539,12 +544,14 @@ Deliverables:
 - Detect stale branches.
 - Detect routine conflicts.
 - Write bounded repair packets for agentic integration workers.
-- Re-run required validation.
+- Execute bounded branch repair from repair packets.
+- Re-run required validation before moving repaired tickets back to `Merging`.
 - Return unresolved semantic or safety exceptions to Safety Review.
 
 Done when:
 
-- Simple rebase/conflict repair has a concrete system-owned repair packet.
+- Simple stale-branch repair can be executed by the system.
+- Content-conflict repair has an explicit agent-command lane and bounded packet.
 - Michael sees only exceptions that require human judgment.
 
 ### Stage 8: Safety Gate Hardening
@@ -597,8 +604,8 @@ The first practical slice should be small:
 6. Update proof packet requirements.
 7. Add tests for contract-first fanout and integration gating.
 
-This slice does not build full automatic branch editing yet. It makes the work
-graph and repair lane real first.
+This slice does not build semantic conflict resolution. It makes the work graph,
+repair packet, and bounded branch-repair lane real first.
 
 Current Silver MVP paths:
 
@@ -609,9 +616,10 @@ Current Silver MVP paths:
 | Linear mirror metadata surface | `scripts/linear_mirror.py` |
 | VCS PR reconciliation and routing | `scripts/vcs_reconciler.py` |
 | Integration repair packets | `scripts/integration_steward.py` |
+| Bounded integration repair runner | `scripts/integration_repair_runner.py` |
 | Objective template | `docs/objectives/TEMPLATE.md` |
 | Silver operation policy | `docs/Symphony-Operation.md` |
-| Focused tests | `tests/test_planning_steward.py`, `tests/test_work_ledger.py`, `tests/test_linear_mirror.py`, `tests/test_vcs_reconciler.py`, `tests/test_integration_steward.py` |
+| Focused tests | `tests/test_planning_steward.py`, `tests/test_work_ledger.py`, `tests/test_linear_mirror.py`, `tests/test_vcs_reconciler.py`, `tests/test_integration_steward.py`, `tests/test_integration_repair_runner.py` |
 
 ## Defer For Now
 

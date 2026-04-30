@@ -189,6 +189,7 @@ python scripts/vcs_reconciler.py
 python scripts/vcs_reconciler.py --apply
 python scripts/integration_steward.py
 python scripts/integration_steward.py --apply
+python scripts/integration_repair_runner.py
 ```
 
 Then preview and apply the Linear mirror again so the visible board follows the
@@ -201,6 +202,28 @@ The integration steward writes a repair packet for each `Rework` ticket. The
 packet includes PR URL, branch, blocker, allowed scope, protected paths,
 validation, and proof-packet refresh requirements. The next Linear mirror
 exposes that packet to Symphony so Rework has concrete repair instructions.
+
+The integration repair runner is the bounded execution lane:
+
+```text
+python scripts/integration_repair_runner.py
+python scripts/integration_repair_runner.py --apply --push --run-validation
+```
+
+It creates an isolated worktree for the PR branch, merges current `main`, runs
+validation, pushes the repaired branch, and moves the ticket back to `Merging`.
+If a content conflict needs agentic editing, pass an explicit agent command
+template:
+
+```text
+python scripts/integration_repair_runner.py \
+  --apply --push --run-validation \
+  --agent-command 'repair-agent --packet {packet_file} --worktree {worktree}'
+```
+
+The runner does not rewrite history or force-push. If merge conflicts remain,
+validation fails, PR evidence is missing, or the repair kind is not bounded, the
+ticket stays in `Rework` with a ledger event explaining why.
 
 Mirror mapping:
 
@@ -692,12 +715,14 @@ Current MVP:
 ```text
 scripts/vcs_reconciler.py
 scripts/integration_steward.py
+scripts/integration_repair_runner.py
 ```
 
-The MVP is detection, routing, and repair-packet creation. It reads GitHub PR
-state through the VCS adapter, matches PRs to ledger tickets, records branch/PR
-evidence, updates ledger status, and writes the bounded instructions a repair
-worker needs. Full automatic branch editing comes after this lane is proven.
+The MVP is detection, routing, repair-packet creation, and bounded branch repair.
+It reads GitHub PR state through the VCS adapter, matches PRs to ledger tickets,
+records branch/PR evidence, updates ledger status, writes the bounded
+instructions a repair worker needs, and can execute clean stale-branch updates.
+Content-conflict editing is available only through an explicit agent command.
 
 Mechanical conflicts may be repaired automatically:
 

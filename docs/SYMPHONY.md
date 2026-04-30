@@ -128,6 +128,7 @@ python scripts/vcs_reconciler.py
 python scripts/vcs_reconciler.py --apply
 python scripts/integration_steward.py
 python scripts/integration_steward.py --apply
+python scripts/integration_repair_runner.py
 python scripts/linear_mirror.py
 python scripts/linear_mirror.py --apply
 ```
@@ -138,10 +139,33 @@ and branch evidence, marks merged PRs `Done`, moves safe green open PRs to
 `Merging`, routes failed checks or conflicts to `Rework`, and routes scope or
 safety exceptions to `Safety Review`. It does not repair code yet.
 
-The integration steward turns `Rework` into a repair packet. It records the PR,
-branch, blocker, allowed scope, protected paths, validation, and proof refresh
-requirements in the ledger. The Linear mirror surfaces that packet so a
-Symphony repair worker can act without Michael restating context.
+The integration steward turns `Rework` into a repair packet. The repair runner
+can then prepare an isolated worktree for the PR branch, merge current `main`,
+run an optional agent command, run validation, push the repaired branch, and
+move the ticket back to `Merging`.
+
+The repair runner is dry-run by default:
+
+```bash
+python scripts/integration_repair_runner.py
+```
+
+To execute only bounded branch repair:
+
+```bash
+python scripts/integration_repair_runner.py --apply --push --run-validation
+```
+
+Content conflicts require an explicit agent command template:
+
+```bash
+python scripts/integration_repair_runner.py \
+  --apply --push --run-validation \
+  --agent-command 'repair-agent --packet {packet_file} --worktree {worktree}'
+```
+
+The runner does not force-push, does not rewrite history, and does not resolve
+semantic or safety exceptions silently.
 
 By default the ledger lives at:
 
