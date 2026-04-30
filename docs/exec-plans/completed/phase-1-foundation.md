@@ -1,7 +1,18 @@
 # Phase 1 Foundation Plan
 
+Status: Completed
+
 Goal: Silver can persist point-in-time data and reproduce a simple 12-1 momentum
 signal on the seed universe.
+
+Completion:
+- Live Phase 1 falsifier proof landed in PR #85:
+  `https://github.com/SilverEnv/Silver/pull/85`
+- Merge commit: `5e2cc560122eec152cdd022ec5707d33dfaa9f69`
+- Report path: `reports/falsifier/week_1_momentum.md`
+- Result: `succeeded`, `model_run_id=2`, `backtest_run_id=2`
+- Process note: the final live proof was completed by a local Codex run, not by
+  Symphony workers.
 
 ## Scope
 
@@ -15,17 +26,17 @@ signal on the seed universe.
 
 ## Acceptance Criteria
 
-- [ ] `.env` is ignored and `.env.example` documents required variables
-- [ ] `pyproject.toml` defines the local Python package and test tooling
-- [ ] `db/migrations/001_foundation.sql` creates core schema objects
+- [x] `.env` is ignored and `.env.example` documents required variables
+- [x] `pyproject.toml` defines the local Python package and test tooling
+- [x] `db/migrations/001_foundation.sql` creates core schema objects
 - [x] Trading calendar is seeded for 2014-2026
 - [x] Seed universe contains 45 liquid equities across major non-REIT sectors
-- [ ] Prices can be ingested for the seed universe
+- [x] Prices can be ingested for the seed universe
 - [x] Phase 1 analytics migration defines normalized prices, forward labels,
   versioned numeric features, and minimal analytics run metadata
-- [ ] Labels are computed for 5, 21, 63, 126, and 252 trading-day horizons
-- [ ] Momentum 12-1 feature is computed without lookahead
-- [ ] Backtest includes costs, baselines, regimes, and label-scramble
+- [x] Labels are computed for 5, 21, 63, 126, and 252 trading-day horizons
+- [x] Momentum 12-1 feature is computed without lookahead
+- [x] Backtest includes costs, baselines, regimes, and label-scramble
 - [x] Falsifier report command writes to
   `reports/falsifier/week_1_momentum.md`
 - [x] Phase 1 pipeline command runs bootstrap, price ingest, labels, momentum
@@ -52,7 +63,7 @@ As of 2026-04-30, the non-mutating Phase 1 wiring checks pass:
 - `python scripts/run_phase1_pipeline.py --check`
 - `python scripts/check_falsifier_inputs.py --check`
 
-Live Phase 1 execution still requires a reachable `DATABASE_URL`. Use:
+Live Phase 1 execution was proven with a reachable `DATABASE_URL`. Use:
 
 ```bash
 python scripts/check_phase1_environment.py --check --live-db

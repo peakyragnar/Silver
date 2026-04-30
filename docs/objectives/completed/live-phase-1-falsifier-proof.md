@@ -1,13 +1,20 @@
 # Live Phase 1 Falsifier Proof
 
 Status:
-Active
+Completed
 
 Objective:
 Prove the Phase 1 Silver pipeline works end to end on real persisted data.
 
 Approval Mode:
 chat-approved local run
+
+Completion:
+- Landed in PR #85: `https://github.com/SilverEnv/Silver/pull/85`
+- Merge commit: `5e2cc560122eec152cdd022ec5707d33dfaa9f69`
+- Merged at: `2026-04-30T15:50:56Z`
+- Process note: this objective was completed by a local Codex run and merged
+  through GitHub, not by Symphony workers.
 
 User Value:
 Michael gets a trustworthy base for continuing the build instead of stacking
@@ -61,8 +68,7 @@ Current Evidence:
   `succeeded`, `model_run_id=2`, and `backtest_run_id=2`.
 
 Current Blocker:
-- None for the live Phase 1 proof. Final local validation and review/merge
-  handoff remain.
+- None. The live Phase 1 proof has landed on `main`.
 
 Out Of Scope:
 - Phase 2 backtest replay infrastructure beyond what is needed to complete this
