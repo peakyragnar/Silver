@@ -18,6 +18,12 @@ cli = importlib.util.module_from_spec(CLI_SPEC)
 sys.modules[CLI_SPEC.name] = cli
 CLI_SPEC.loader.exec_module(cli)
 
+from silver.backtest.momentum_falsifier import (  # noqa: E402
+    MomentumFalsifierResult,
+    MomentumHeadlineMetrics,
+    MomentumWindowResult,
+)
+
 
 def test_check_mode_validates_without_database_url() -> None:
     result = subprocess.run(
@@ -339,6 +345,115 @@ def test_report_traceability_validation_checks_complete_backtest_claim_metadata(
     assert not (tmp_path / "report.md").exists()
 
 
+def test_label_scramble_payload_uses_scored_strategy_test_rows(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calendar = _calendar()
+    rows = _momentum_rows(calendar, session_count=420)
+    result = cli.run_momentum_falsifier(
+        rows,
+        calendar=calendar,
+        horizon_sessions=63,
+        min_train_sessions=cli.DEFAULT_MIN_TRAIN_SESSIONS,
+        test_sessions=cli.DEFAULT_TEST_SESSIONS,
+        step_sessions=cli.DEFAULT_STEP_SESSIONS,
+        round_trip_cost_bps=cli.DEFAULT_ROUND_TRIP_COST_BPS,
+    )
+    assert result.status == "succeeded"
+    scored_dates = tuple(
+        date_result.asof_date for date_result in cli._date_results(result)
+    )
+    assert scored_dates
+    assert rows[0].asof_date not in set(scored_dates)
+    captured: dict[str, Any] = {}
+
+    def capture_label_scramble(
+        samples: tuple[Any, ...],
+        *,
+        seed: int,
+        trial_count: int,
+        scoring_function: Any | None = None,
+        **_kwargs: Any,
+    ) -> FakeLabelScrambleResult:
+        captured["samples"] = samples
+        captured["seed"] = seed
+        captured["trial_count"] = trial_count
+        captured["scoring_function"] = scoring_function
+        return FakeLabelScrambleResult()
+
+    monkeypatch.setattr(cli, "run_label_scramble", capture_label_scramble)
+
+    metrics, _passed = cli._label_scramble_payload(rows=rows, result=result)
+
+    samples = captured["samples"]
+    sample_dates = {date.fromisoformat(sample.group_key) for sample in samples}
+    assert sample_dates == set(scored_dates)
+    assert len(samples) == result.headline_metrics.eligible_observations
+    assert metrics["scored_row_source"] == "reported_scored_walk_forward_test_rows"
+    assert metrics["scored_test_dates"] == result.headline_metrics.scored_test_dates
+    assert metrics["eligible_observations"] == (
+        result.headline_metrics.eligible_observations
+    )
+    assert metrics["selected_observations"] == (
+        result.headline_metrics.selected_observations
+    )
+    assert captured["seed"] == cli.DEFAULT_LABEL_SCRAMBLE_SEED
+    assert captured["trial_count"] == cli.DEFAULT_LABEL_SCRAMBLE_TRIAL_COUNT
+    assert captured["scoring_function"] is not None
+
+
+def test_label_scramble_selection_mask_matches_reported_strategy_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    scored_date = date(2024, 1, 2)
+    horizon_date = date(2024, 4, 1)
+    rows = (
+        cli.MomentumBacktestRow(
+            ticker="HIGH",
+            asof_date=scored_date,
+            horizon_date=horizon_date,
+            feature_value=10.0,
+            realized_return=0.01,
+        ),
+        cli.MomentumBacktestRow(
+            ticker="LOW",
+            asof_date=scored_date,
+            horizon_date=horizon_date,
+            feature_value=1.0,
+            realized_return=0.20,
+        ),
+    )
+    result = _single_date_falsifier_result(
+        scored_date=scored_date,
+        selected_tickers=("LOW",),
+        strategy_gross_return=0.20,
+        baseline_gross_return=0.105,
+    )
+    captured: dict[str, Any] = {}
+
+    def capture_label_scramble(
+        samples: tuple[Any, ...],
+        *,
+        scoring_function: Any | None = None,
+        **_kwargs: Any,
+    ) -> FakeLabelScrambleResult:
+        captured["samples"] = samples
+        captured["scoring_function"] = scoring_function
+        return FakeLabelScrambleResult()
+
+    monkeypatch.setattr(cli, "run_label_scramble", capture_label_scramble)
+
+    metrics, _passed = cli._label_scramble_payload(rows=rows, result=result)
+
+    samples_by_id = {sample.sample_id: sample for sample in captured["samples"]}
+    assert samples_by_id["LOW-2024-01-02"].feature_value == 1.0
+    assert samples_by_id["HIGH-2024-01-02"].feature_value == 0.0
+    assert captured["scoring_function"] is not None
+    assert captured["scoring_function"](captured["samples"]) == pytest.approx(0.198)
+    assert metrics["selection_rule"] == "reported_top_half_selection_mask"
+    assert metrics["reported_mean_strategy_net_horizon_return"] == pytest.approx(0.198)
+
+
 def test_report_run_finishes_model_and_backtest_as_insufficient_data(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -507,6 +622,66 @@ class FakeLabelScrambleResult:
 
 def _fake_label_scramble(*_args: Any, **_kwargs: Any) -> FakeLabelScrambleResult:
     return FakeLabelScrambleResult()
+
+
+def _single_date_falsifier_result(
+    *,
+    scored_date: date,
+    selected_tickers: tuple[str, ...],
+    strategy_gross_return: float,
+    baseline_gross_return: float,
+) -> Any:
+    cost_fraction = cli.DEFAULT_ROUND_TRIP_COST_BPS / 10_000.0
+    strategy_net_return = strategy_gross_return - cost_fraction
+    baseline_net_return = baseline_gross_return - cost_fraction
+    date_result = cli.MomentumDateResult(
+        asof_date=scored_date,
+        eligible_count=2,
+        selected_tickers=selected_tickers,
+        strategy_gross_return=strategy_gross_return,
+        strategy_net_return=strategy_net_return,
+        baseline_gross_return=baseline_gross_return,
+        baseline_net_return=baseline_net_return,
+    )
+    return MomentumFalsifierResult(
+        status="succeeded",
+        horizon_sessions=63,
+        round_trip_cost_bps=cli.DEFAULT_ROUND_TRIP_COST_BPS,
+        min_train_sessions=cli.DEFAULT_MIN_TRAIN_SESSIONS,
+        test_sessions=cli.DEFAULT_TEST_SESSIONS,
+        step_sessions=cli.DEFAULT_STEP_SESSIONS,
+        windows=(
+            MomentumWindowResult(
+                split_index=0,
+                train_start=scored_date,
+                train_end=scored_date,
+                test_start=scored_date,
+                test_end=scored_date,
+                train_observations=2,
+                test_observations=2,
+                scored_dates=1,
+                selected_observations=len(selected_tickers),
+                strategy_net_return=strategy_net_return,
+                baseline_net_return=baseline_net_return,
+                date_results=(date_result,),
+            ),
+        ),
+        headline_metrics=MomentumHeadlineMetrics(
+            split_count=1,
+            scored_test_dates=1,
+            eligible_observations=2,
+            selected_observations=len(selected_tickers),
+            mean_strategy_gross_return=strategy_gross_return,
+            mean_strategy_net_return=strategy_net_return,
+            mean_baseline_gross_return=baseline_gross_return,
+            mean_baseline_net_return=baseline_net_return,
+            mean_net_difference_vs_baseline=strategy_net_return - baseline_net_return,
+            strategy_net_hit_rate=1.0,
+            strategy_net_return_stddev=None,
+            strategy_net_return_to_stddev=None,
+        ),
+        failure_modes=(),
+    )
 
 
 class FakeMetadataRepository:
