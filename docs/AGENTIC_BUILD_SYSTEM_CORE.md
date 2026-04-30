@@ -571,6 +571,9 @@ Done when:
 
 - Safety stops are explainable, sparse, and tied to Objective context.
 - Routine repair and true exception handling are clearly separated.
+- Planned contract tickets can pass additive docs-only contract clarifications
+  inside their declared ownership while preserving Safety Review for code,
+  deletion, destructive, secret, paid/live, or scope-drift risk.
 
 ### Stage 9: Portability Extraction
 

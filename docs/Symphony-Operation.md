@@ -885,6 +885,12 @@ Safety Review is not required for routine stale branches, mechanical merge
 conflicts, formatting conflicts, failed checks with clear fixes, or proof-packet
 refreshes. Those move through `Rework`.
 
+A planned contract ticket may also proceed without Safety Review when a
+PIT-related trigger is caused only by additive documentation changes in paths
+the ticket explicitly owns. That exception is narrow: code changes, deletions,
+scope drift, destructive behavior, paid/live behavior, and secret handling still
+stop for Safety Review.
+
 ## Automation Ladder
 
 Do not jump straight to overnight autonomy. Increase automation only after the

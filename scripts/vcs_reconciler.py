@@ -336,12 +336,26 @@ def classify_pr(
         )
 
     if ticket.status == "Safety Review" and pr.state != "MERGED" and not pr.merged_at:
-        return build_action(
+        issue = linear_issue_for_ticket(ticket)
+        safety_trigger = merge_steward.safety_review_trigger(issue, pr)
+        allowance = (
+            objective_contract_allowance(ticket, pr, safety_trigger)
+            if safety_trigger is not None
+            else None
+        )
+        if allowance is None:
+            return build_action(
+                ticket,
+                pr,
+                action="wait",
+                target_status=None,
+                reason="ticket is already in Safety Review",
+            )
+        return classify_allowed_contract_pr(
             ticket,
             pr,
-            action="wait",
-            target_status=None,
-            reason="ticket is already in Safety Review",
+            required_checks,
+            allowance_reason=allowance,
         )
     if ticket.status == "Blocked" and pr.state != "MERGED" and not pr.merged_at:
         return build_action(
@@ -364,6 +378,14 @@ def classify_pr(
             reason=decision.reason,
         )
     if decision.action == "move_safety_review":
+        allowance = objective_contract_allowance(ticket, pr, decision.reason)
+        if allowance is not None:
+            return classify_allowed_contract_pr(
+                ticket,
+                pr,
+                required_checks,
+                allowance_reason=allowance,
+            )
         return build_action(
             ticket,
             pr,
@@ -412,6 +434,84 @@ def classify_pr(
         target_status=None,
         reason=decision.reason,
     )
+
+
+def classify_allowed_contract_pr(
+    ticket: TicketRecord,
+    pr: merge_steward.PullRequest,
+    required_checks: Sequence[str],
+    *,
+    allowance_reason: str,
+) -> ReconciliationAction:
+    merge_state = (pr.merge_state_status or "UNKNOWN").upper()
+    if merge_state == "DIRTY":
+        return build_action(
+            ticket,
+            pr,
+            action="move_rework",
+            target_status=work_ledger.TICKET_STATUS_REWORK,
+            reason=f"{allowance_reason}; PR has merge conflicts",
+        )
+
+    check_status = merge_steward.required_check_status(pr, required_checks)
+    if check_status.action == "move_rework":
+        return build_action(
+            ticket,
+            pr,
+            action="move_rework",
+            target_status=work_ledger.TICKET_STATUS_REWORK,
+            reason=f"{allowance_reason}; {check_status.reason}",
+        )
+    if check_status.action == "wait":
+        return build_action(
+            ticket,
+            pr,
+            action="wait",
+            target_status=None,
+            reason=f"{allowance_reason}; {check_status.reason}",
+        )
+
+    if merge_state in {"BLOCKED", "UNKNOWN"}:
+        return build_action(
+            ticket,
+            pr,
+            action="wait",
+            target_status=None,
+            reason=f"{allowance_reason}; PR merge state is {merge_state}",
+        )
+    if pr.in_merge_queue:
+        return build_action(
+            ticket,
+            pr,
+            action="move_merging",
+            target_status="Merging",
+            reason=f"{allowance_reason}; PR is already in GitHub merge queue",
+        )
+    if pr.auto_merge_enabled:
+        return build_action(
+            ticket,
+            pr,
+            action="move_merging",
+            target_status="Merging",
+            reason=f"{allowance_reason}; PR auto-merge is already enabled",
+        )
+
+    return build_action(
+        ticket,
+        pr,
+        action="move_merging",
+        target_status="Merging",
+        reason=f"{allowance_reason}; PR is green and mergeable",
+    )
+
+
+def objective_contract_allowance(
+    ticket: TicketRecord,
+    pr: merge_steward.PullRequest,
+    safety_reason: str,
+) -> str | None:
+    issue = linear_issue_for_ticket(ticket)
+    return merge_steward.planned_contract_safety_allowance(issue, pr, safety_reason)
 
 
 def linear_issue_for_ticket(ticket: TicketRecord) -> merge_steward.LinearIssue:
