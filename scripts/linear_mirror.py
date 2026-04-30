@@ -44,7 +44,14 @@ LEDGER_TO_LINEAR_STATE = {
     "Duplicate": "Duplicate",
 }
 
-MirrorActionName = Literal["create", "update_state", "noop", "skip"]
+MirrorActionName = Literal[
+    "create",
+    "update_state",
+    "update_description",
+    "update_state_and_description",
+    "noop",
+    "skip",
+]
 OutputFormat = Literal["text", "json"]
 
 
@@ -84,6 +91,9 @@ class LedgerMirrorTicket:
     objective_impact: str
     technical_summary: str
     status: str
+    ticket_role: str
+    dependency_group: str
+    contracts_touched: tuple[str, ...]
     risk_class: str
     conflict_domain: str
     owns: tuple[str, ...]
@@ -91,6 +101,7 @@ class LedgerMirrorTicket:
     dependencies: tuple[str, ...]
     conflict_zones: tuple[str, ...]
     validation: tuple[str, ...]
+    proof_packet: tuple[str, ...]
     linear_identifier: str | None
 
 
@@ -270,6 +281,19 @@ class LinearClient:
         """
         self.graphql(mutation, {"issueId": issue_id, "stateId": state_id})
 
+    def update_issue_description(self, issue_id: str, description: str) -> None:
+        mutation = """
+        mutation($issueId: String!, $description: String!) {
+          issueUpdate(id: $issueId, input: { description: $description }) {
+            success
+          }
+        }
+        """
+        self.graphql(
+            mutation,
+            {"issueId": issue_id, "description": description},
+        )
+
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
@@ -392,12 +416,36 @@ def decide_mirror_action(
             target_state=target_state,
             reason="no Linear issue is linked to this ledger ticket",
         )
-    if issue.state != target_state:
+    state_mismatch = issue.state != target_state
+    description_mismatch = not descriptions_match(
+        issue.description,
+        linear_description(ticket),
+    )
+    if state_mismatch and description_mismatch:
+        return MirrorAction(
+            action="update_state_and_description",
+            ticket=ticket,
+            target_state=target_state,
+            reason=(
+                f"Linear state is {issue.state}, expected {target_state}; "
+                "description metadata is stale"
+            ),
+            linear_issue=issue,
+        )
+    if state_mismatch:
         return MirrorAction(
             action="update_state",
             ticket=ticket,
             target_state=target_state,
             reason=f"Linear state is {issue.state}, expected {target_state}",
+            linear_issue=issue,
+        )
+    if description_mismatch:
+        return MirrorAction(
+            action="update_description",
+            ticket=ticket,
+            target_state=target_state,
+            reason="Linear description metadata is stale",
             linear_issue=issue,
         )
     return MirrorAction(
@@ -444,10 +492,31 @@ def apply_mirror_action(
         record_linear_sync(connection, action.ticket, created, action.target_state, now)
         return
 
-    if action.action == "update_state":
+    if action.action in ("update_state", "update_state_and_description"):
         if action.linear_issue is None:
             raise LinearMirrorError(f"{action.ticket.id}: missing Linear issue")
         client.update_issue_state(action.linear_issue.id, target_state.id)
+        if action.action == "update_state_and_description":
+            client.update_issue_description(
+                action.linear_issue.id,
+                linear_description(action.ticket),
+            )
+        record_linear_sync(
+            connection,
+            action.ticket,
+            action.linear_issue,
+            action.target_state,
+            now,
+        )
+        return
+
+    if action.action == "update_description":
+        if action.linear_issue is None:
+            raise LinearMirrorError(f"{action.ticket.id}: missing Linear issue")
+        client.update_issue_description(
+            action.linear_issue.id,
+            linear_description(action.ticket),
+        )
         record_linear_sync(
             connection,
             action.ticket,
@@ -480,6 +549,9 @@ def row_to_mirror_ticket(row: sqlite3.Row) -> LedgerMirrorTicket:
         objective_impact=row["objective_impact"],
         technical_summary=row["technical_summary"],
         status=row["status"],
+        ticket_role=row["ticket_role"],
+        dependency_group=row["dependency_group"],
+        contracts_touched=tuple(work_ledger.loads_json(row["contracts_touched_json"])),
         risk_class=row["risk_class"],
         conflict_domain=row["conflict_domain"],
         owns=tuple(work_ledger.loads_json(row["owns_json"])),
@@ -487,8 +559,13 @@ def row_to_mirror_ticket(row: sqlite3.Row) -> LedgerMirrorTicket:
         dependencies=tuple(work_ledger.loads_json(row["dependencies_json"])),
         conflict_zones=tuple(work_ledger.loads_json(row["conflict_zones_json"])),
         validation=tuple(work_ledger.loads_json(row["validation_json"])),
+        proof_packet=tuple(work_ledger.loads_json(row["proof_packet_json"])),
         linear_identifier=row["linear_identifier"],
     )
+
+
+def descriptions_match(current: str, expected: str) -> bool:
+    return current.strip() == expected.strip()
 
 
 def matching_issue(
@@ -586,6 +663,10 @@ def linear_description(ticket: LedgerMirrorTicket) -> str:
     lines = [
         f"Parent Objective: {ticket.objective_id}",
         f"Ledger Ticket: {ticket.id}",
+        f"Ticket Role: {ticket.ticket_role}",
+        f"Dependency Group: {ticket.dependency_group}",
+        f"Contracts Touched: {', '.join(ticket.contracts_touched) or 'none'}",
+        f"Risk Class: {ticket.risk_class}",
         "",
         "Purpose:",
         ticket.purpose,
@@ -595,9 +676,6 @@ def linear_description(ticket: LedgerMirrorTicket) -> str:
         "",
         "Technical Summary:",
         ticket.technical_summary,
-        "",
-        "Risk Class:",
-        ticket.risk_class,
         "",
         "Conflict Domain:",
         ticket.conflict_domain,
@@ -616,6 +694,9 @@ def linear_description(ticket: LedgerMirrorTicket) -> str:
         "",
         "Validation:",
         *bullet_lines(ticket.validation),
+        "",
+        "Proof Packet Requirements:",
+        *bullet_lines(ticket.proof_packet),
     ]
     return "\n".join(lines).strip() + "\n"
 

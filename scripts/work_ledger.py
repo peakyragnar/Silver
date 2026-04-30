@@ -25,7 +25,7 @@ import planning_steward  # noqa: E402
 
 DEFAULT_LEDGER_PATH = ROOT / ".silver" / "work_ledger.db"
 LEDGER_ENV_VAR = "SILVER_LEDGER_PATH"
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 OBJECTIVE_STATUS_ACTIVE = "active"
 TICKET_STATUS_BACKLOG = "Backlog"
@@ -63,11 +63,16 @@ class LedgerTicket:
     sequence: int
     title: str
     status: str
+    ticket_role: str
+    dependency_group: str
+    contracts_touched: tuple[str, ...]
+    risk_class: str
     objective_impact: str
     conflict_domain: str
     dependencies: tuple[str, ...]
     owns: tuple[str, ...]
     validation: tuple[str, ...]
+    proof_packet: tuple[str, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -268,6 +273,8 @@ def connect_existing(path: Path) -> sqlite3.Connection:
             f"ledger does not exist: {path}. Run `scripts/work_ledger.py init` first."
         )
     connection = connect(path)
+    if schema_version(connection) < SCHEMA_VERSION:
+        apply_schema(connection)
     ensure_schema_current(connection)
     return connection
 
@@ -311,6 +318,9 @@ def apply_schema(connection: sqlite3.Connection) -> None:
           purpose TEXT NOT NULL,
           objective_impact TEXT NOT NULL,
           technical_summary TEXT NOT NULL,
+          ticket_role TEXT NOT NULL,
+          dependency_group TEXT NOT NULL,
+          contracts_touched_json TEXT NOT NULL,
           status TEXT NOT NULL,
           risk_class TEXT NOT NULL,
           conflict_domain TEXT NOT NULL,
@@ -319,6 +329,7 @@ def apply_schema(connection: sqlite3.Connection) -> None:
           dependencies_json TEXT NOT NULL,
           conflict_zones_json TEXT NOT NULL,
           validation_json TEXT NOT NULL,
+          proof_packet_json TEXT NOT NULL,
           branch TEXT,
           pr_url TEXT,
           linear_identifier TEXT,
@@ -391,15 +402,37 @@ def apply_schema(connection: sqlite3.Connection) -> None:
         CREATE INDEX IF NOT EXISTS idx_ticket_events_ticket ON ticket_events(ticket_id);
         """
     )
+    ensure_ticket_metadata_columns(connection)
+    connection.execute("CREATE INDEX IF NOT EXISTS idx_tickets_role ON tickets(ticket_role)")
     connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
 
 def ensure_schema_current(connection: sqlite3.Connection) -> None:
-    version = int(connection.execute("PRAGMA user_version").fetchone()[0])
+    version = schema_version(connection)
     if version != SCHEMA_VERSION:
         raise WorkLedgerError(
             f"unsupported work ledger schema version {version}; expected {SCHEMA_VERSION}"
         )
+
+
+def schema_version(connection: sqlite3.Connection) -> int:
+    return int(connection.execute("PRAGMA user_version").fetchone()[0])
+
+
+def ensure_ticket_metadata_columns(connection: sqlite3.Connection) -> None:
+    existing_columns = {
+        row["name"]
+        for row in connection.execute("PRAGMA table_info(tickets)").fetchall()
+    }
+    column_definitions = {
+        "ticket_role": "TEXT NOT NULL DEFAULT 'implementation'",
+        "dependency_group": "TEXT NOT NULL DEFAULT 'default'",
+        "contracts_touched_json": "TEXT NOT NULL DEFAULT '[]'",
+        "proof_packet_json": "TEXT NOT NULL DEFAULT '[]'",
+    }
+    for column, definition in column_definitions.items():
+        if column not in existing_columns:
+            connection.execute(f"ALTER TABLE tickets ADD COLUMN {column} {definition}")
 
 
 def active_objective_proposals(
@@ -518,21 +551,29 @@ def upsert_ticket(
     status = TICKET_STATUS_BACKLOG if existing is None else existing["status"]
     created_at = now if existing is None else existing["created_at"]
     conflict_domain = infer_conflict_domain(ticket)
-    risk_class = infer_risk_class(ticket, conflict_domain)
+    risk_class = ticket.risk_class or infer_risk_class(ticket, conflict_domain)
+    contracts_touched = ticket.contracts_touched or infer_contracts_touched(
+        ticket,
+        conflict_domain,
+    )
     connection.execute(
         """
         INSERT INTO tickets (
           id, objective_id, sequence, title, purpose, objective_impact,
-          technical_summary, status, risk_class, conflict_domain, owns_json,
-          do_not_touch_json, dependencies_json, conflict_zones_json,
-          validation_json, branch, pr_url, linear_identifier, created_at, updated_at
+          technical_summary, ticket_role, dependency_group, contracts_touched_json,
+          status, risk_class, conflict_domain, owns_json, do_not_touch_json,
+          dependencies_json, conflict_zones_json, validation_json, proof_packet_json,
+          branch, pr_url, linear_identifier, created_at, updated_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
           title = excluded.title,
           purpose = excluded.purpose,
           objective_impact = excluded.objective_impact,
           technical_summary = excluded.technical_summary,
+          ticket_role = excluded.ticket_role,
+          dependency_group = excluded.dependency_group,
+          contracts_touched_json = excluded.contracts_touched_json,
           risk_class = excluded.risk_class,
           conflict_domain = excluded.conflict_domain,
           owns_json = excluded.owns_json,
@@ -540,6 +581,7 @@ def upsert_ticket(
           dependencies_json = excluded.dependencies_json,
           conflict_zones_json = excluded.conflict_zones_json,
           validation_json = excluded.validation_json,
+          proof_packet_json = excluded.proof_packet_json,
           updated_at = excluded.updated_at
         """,
         (
@@ -550,6 +592,9 @@ def upsert_ticket(
             ticket.purpose,
             ticket.objective_impact,
             ticket.technical_summary,
+            ticket.ticket_role,
+            ticket.dependency_group,
+            dumps_json(contracts_touched),
             status,
             risk_class,
             conflict_domain,
@@ -558,6 +603,7 @@ def upsert_ticket(
             dumps_json(ticket.dependencies),
             dumps_json(ticket.conflict_zones),
             dumps_json(ticket.validation),
+            dumps_json(ticket.proof_packet),
             created_at,
             now,
         ),
@@ -809,11 +855,16 @@ def row_to_ticket(row: sqlite3.Row) -> LedgerTicket:
         sequence=int(row["sequence"]),
         title=row["title"],
         status=row["status"],
+        ticket_role=row["ticket_role"],
+        dependency_group=row["dependency_group"],
+        contracts_touched=tuple(loads_json(row["contracts_touched_json"])),
+        risk_class=row["risk_class"],
         objective_impact=row["objective_impact"],
         conflict_domain=row["conflict_domain"],
         dependencies=tuple(loads_json(row["dependencies_json"])),
         owns=tuple(loads_json(row["owns_json"])),
         validation=tuple(loads_json(row["validation_json"])),
+        proof_packet=tuple(loads_json(row["proof_packet_json"])),
     )
 
 
@@ -825,11 +876,90 @@ def runnable_blocker(
     dependency = dependency_blocker(ticket, connection)
     if dependency is not None:
         return dependency
+    role = role_blocker(ticket, connection)
+    if role is not None:
+        return role
     if ticket.conflict_domain == "migration":
         for active_ticket in active:
             if active_ticket.conflict_domain == "migration":
                 return f"migration lane occupied by {active_ticket.id}"
+    contract = active_contract_blocker(ticket, active)
+    if contract is not None:
+        return contract
     return None
+
+
+def role_blocker(
+    ticket: LedgerTicket,
+    connection: sqlite3.Connection,
+) -> str | None:
+    blocking_roles_by_role = {
+        "implementation": ("contract",),
+        "integration": ("contract", "implementation"),
+        "validation": ("contract", "implementation", "integration"),
+    }
+    blocking_roles = blocking_roles_by_role.get(ticket.ticket_role)
+    if blocking_roles is None:
+        return None
+
+    rows = connection.execute(
+        """
+        SELECT id, ticket_role, dependency_group, status
+        FROM tickets
+        WHERE objective_id = ? AND id != ?
+        ORDER BY sequence
+        """,
+        (ticket.objective_id, ticket.id),
+    ).fetchall()
+    for row in rows:
+        if row["status"] in TICKET_TERMINAL_STATUSES:
+            continue
+        if row["ticket_role"] not in blocking_roles:
+            continue
+        if not same_dependency_group(ticket.dependency_group, row["dependency_group"]):
+            continue
+        return f"blocked by unfinished {row['ticket_role']} ticket: {row['id']}"
+    return None
+
+
+def same_dependency_group(left: str, right: str) -> bool:
+    if left == "all" or right == "all":
+        return True
+    return left == right
+
+
+def active_contract_blocker(
+    ticket: LedgerTicket,
+    active: Sequence[LedgerTicket],
+) -> str | None:
+    if ticket.ticket_role == "docs":
+        return None
+    ticket_contracts = set(ticket_contract_keys(ticket))
+    if not ticket_contracts:
+        return None
+    for active_ticket in active:
+        if active_ticket.id == ticket.id:
+            continue
+        if active_ticket.ticket_role != "contract" and ticket.ticket_role != "contract":
+            continue
+        overlap = ticket_contracts.intersection(ticket_contract_keys(active_ticket))
+        if overlap:
+            contract = sorted(overlap)[0]
+            return f"contract {contract} occupied by {active_ticket.id}"
+    return None
+
+
+def ticket_contract_keys(ticket: LedgerTicket) -> tuple[str, ...]:
+    if ticket.contracts_touched:
+        return ticket.contracts_touched
+    if ticket.conflict_domain in {
+        "migration",
+        "backtest",
+        "reporting",
+        "orchestration",
+    }:
+        return (f"domain:{ticket.conflict_domain}",)
+    return ()
 
 
 def dependency_blocker(
@@ -931,6 +1061,39 @@ def infer_risk_class(
     return "low"
 
 
+def infer_contracts_touched(
+    ticket: planning_steward.TicketProposal,
+    conflict_domain: str,
+) -> tuple[str, ...]:
+    haystack = " ".join(
+        (
+            ticket.title,
+            ticket.purpose,
+            ticket.technical_summary,
+        )
+    ).lower()
+    paths = " ".join((*ticket.owns, *ticket.conflict_zones)).lower()
+    contracts: list[str] = []
+    if conflict_domain == "migration" or any(
+        token in paths for token in ("db/migrations", "schema")
+    ):
+        contracts.append("schema")
+    if conflict_domain == "orchestration" or any(
+        token in paths
+        for token in ("planning_steward.py", "work_ledger.py", "linear_mirror.py")
+    ):
+        contracts.append("objective-dag")
+    if conflict_domain == "backtest":
+        contracts.append("backtest")
+    if conflict_domain == "reporting":
+        contracts.append("reporting")
+    if any(token in haystack for token in ("objective", "ticket dag", "ledger")):
+        contracts.append("objective-dag")
+    if ticket.ticket_role == "contract" and not contracts:
+        contracts.append(conflict_domain)
+    return tuple(dict.fromkeys(contract for contract in contracts if contract))
+
+
 def scalar_int(
     connection: sqlite3.Connection,
     query: str,
@@ -963,11 +1126,16 @@ def replace_ticket_status(ticket: LedgerTicket, status: str) -> LedgerTicket:
         sequence=ticket.sequence,
         title=ticket.title,
         status=status,
+        ticket_role=ticket.ticket_role,
+        dependency_group=ticket.dependency_group,
+        contracts_touched=ticket.contracts_touched,
+        risk_class=ticket.risk_class,
         objective_impact=ticket.objective_impact,
         conflict_domain=ticket.conflict_domain,
         dependencies=ticket.dependencies,
         owns=ticket.owns,
         validation=ticket.validation,
+        proof_packet=ticket.proof_packet,
     )
 
 
@@ -1034,7 +1202,8 @@ def render_tickets(
     lines = ["Runnable tickets:"]
     for ticket in tickets:
         lines.append(
-            f"- {ticket.id} | {ticket.status} | {ticket.conflict_domain} | "
+            f"- {ticket.id} | {ticket.status} | {ticket.ticket_role} | "
+            f"{ticket.conflict_domain} | "
             f"{ticket.title}"
         )
     return "\n".join(lines)
@@ -1105,11 +1274,16 @@ def ticket_payload(ticket: LedgerTicket) -> dict[str, object]:
         "sequence": ticket.sequence,
         "title": ticket.title,
         "status": ticket.status,
+        "ticket_role": ticket.ticket_role,
+        "dependency_group": ticket.dependency_group,
+        "contracts_touched": list(ticket.contracts_touched),
+        "risk_class": ticket.risk_class,
         "objective_impact": ticket.objective_impact,
         "conflict_domain": ticket.conflict_domain,
         "dependencies": list(ticket.dependencies),
         "owns": list(ticket.owns),
         "validation": list(ticket.validation),
+        "proof_packet": list(ticket.proof_packet),
     }
 
 

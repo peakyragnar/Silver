@@ -8,7 +8,7 @@ import json
 import re
 import subprocess
 import sys
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -21,6 +21,15 @@ OBJECTIVE_COMPLETED_DIR = Path("docs/objectives/completed")
 
 OutputFormat = Literal["markdown", "json"]
 ObjectiveSourceKind = Literal["objective_file", "repo_heuristic"]
+TicketRole = Literal["contract", "implementation", "integration", "validation", "docs"]
+
+VALID_TICKET_ROLES: tuple[TicketRole, ...] = (
+    "contract",
+    "implementation",
+    "integration",
+    "validation",
+    "docs",
+)
 
 OBJECTIVE_REQUIRED_SECTIONS = (
     "Objective",
@@ -36,15 +45,24 @@ OBJECTIVE_REQUIRED_SECTIONS = (
 
 TICKET_FIELD_ALIASES = {
     "title": "title",
+    "role": "ticket_role",
+    "ticket role": "ticket_role",
     "purpose": "purpose",
     "objective impact": "objective_impact",
+    "expected impact on objective": "objective_impact",
     "technical summary": "technical_summary",
+    "dependency group": "dependency_group",
+    "contracts": "contracts_touched",
+    "contracts touched": "contracts_touched",
+    "risk class": "risk_class",
     "owns": "owns",
     "do not touch": "do_not_touch",
     "dependencies": "dependencies",
     "conflict zones": "conflict_zones",
     "validation": "validation",
     "validation required": "validation",
+    "proof packet": "proof_packet",
+    "proof packet requirements": "proof_packet",
 }
 
 
@@ -76,6 +94,11 @@ class TicketProposal:
     dependencies: tuple[str, ...]
     conflict_zones: tuple[str, ...]
     validation: tuple[str, ...]
+    ticket_role: TicketRole = "implementation"
+    dependency_group: str = "default"
+    contracts_touched: tuple[str, ...] = ()
+    risk_class: str = ""
+    proof_packet: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -556,17 +579,187 @@ def _ticket_from_objective_block(
         or tuple(default_validation)
     )
     owns = _section_items(fields.get("owns", ())) or tuple(default_conflict_zones)
+    do_not_touch = _optional_items(fields.get("do_not_touch", ()))
+    dependencies = _optional_items(fields.get("dependencies", ()))
+    ticket_role = _ticket_role(
+        fields,
+        title=title,
+        purpose=purpose,
+        technical_summary=technical_summary,
+        owns=owns,
+        conflict_zones=conflict_zones,
+    )
+    contracts_touched = (
+        _optional_items(fields.get("contracts_touched", ()))
+        or _infer_contracts_touched(
+            ticket_role=ticket_role,
+            title=title,
+            purpose=purpose,
+            technical_summary=technical_summary,
+            owns=owns,
+            conflict_zones=conflict_zones,
+        )
+    )
     return TicketProposal(
         title=title,
         purpose=purpose,
         objective_impact=objective_impact,
         technical_summary=technical_summary,
         owns=owns,
-        do_not_touch=_section_items(fields.get("do_not_touch", ())),
-        dependencies=_section_items(fields.get("dependencies", ())),
+        do_not_touch=do_not_touch,
+        dependencies=dependencies,
         conflict_zones=conflict_zones,
         validation=validation,
+        ticket_role=ticket_role,
+        dependency_group=_dependency_group(
+            _field_paragraph(fields.get("dependency_group", ()))
+        ),
+        contracts_touched=contracts_touched,
+        risk_class=_risk_class(_field_paragraph(fields.get("risk_class", ()))),
+        proof_packet=_optional_items(fields.get("proof_packet", ())),
     )
+
+
+def _optional_items(lines: Sequence[str]) -> tuple[str, ...]:
+    return tuple(
+        item
+        for item in _section_items(lines)
+        if _normalized_heading(item) not in {"none", "n a", "na", "not applicable"}
+    )
+
+
+def _ticket_role(
+    fields: Mapping[str, tuple[str, ...]],
+    *,
+    title: str,
+    purpose: str,
+    technical_summary: str,
+    owns: Sequence[str],
+    conflict_zones: Sequence[str],
+) -> TicketRole:
+    explicit = _field_paragraph(fields.get("ticket_role", ()))
+    if explicit:
+        return _normalize_ticket_role(explicit)
+    return _infer_ticket_role(
+        title=title,
+        purpose=purpose,
+        technical_summary=technical_summary,
+        owns=owns,
+        conflict_zones=conflict_zones,
+    )
+
+
+def _normalize_ticket_role(value: str) -> TicketRole:
+    key = _normalized_heading(value)
+    aliases: dict[str, TicketRole] = {
+        "contract": "contract",
+        "contract ticket": "contract",
+        "schema": "contract",
+        "interface": "contract",
+        "implementation": "implementation",
+        "implement": "implementation",
+        "feature": "implementation",
+        "feature work": "implementation",
+        "integration": "integration",
+        "integrate": "integration",
+        "validation": "validation",
+        "validate": "validation",
+        "test": "validation",
+        "testing": "validation",
+        "docs": "docs",
+        "doc": "docs",
+        "documentation": "docs",
+    }
+    role = aliases.get(key)
+    if role is not None:
+        return role
+    raise PlanningStewardError(
+        f"unsupported ticket role {value!r}; expected one of: "
+        + ", ".join(VALID_TICKET_ROLES)
+    )
+
+
+def _infer_ticket_role(
+    *,
+    title: str,
+    purpose: str,
+    technical_summary: str,
+    owns: Sequence[str],
+    conflict_zones: Sequence[str],
+) -> TicketRole:
+    haystack = " ".join((title, purpose, technical_summary)).lower()
+    paths = " ".join((*owns, *conflict_zones)).lower()
+    if any(token in haystack for token in ("docs", "documentation", "runbook")):
+        return "docs"
+    if any(
+        token in haystack
+        for token in ("validation", "validate", "replay", "traceability", "proof")
+    ):
+        return "validation"
+    if any(token in haystack for token in ("integration", "integrate", "reconcile")):
+        return "integration"
+    if any(
+        token in haystack
+        for token in ("contract", "schema", "migration", "interface", "api", "dag")
+    ):
+        return "contract"
+    if "docs/" in paths and not any(
+        token in paths for token in ("scripts/", "src/", "db/")
+    ):
+        return "docs"
+    return "implementation"
+
+
+def _dependency_group(value: str) -> str:
+    if not value.strip():
+        return "default"
+    return _slug(value)
+
+
+def _risk_class(value: str) -> str:
+    if not value.strip():
+        return ""
+    return _slug(value)
+
+
+def _infer_contracts_touched(
+    *,
+    ticket_role: TicketRole,
+    title: str,
+    purpose: str,
+    technical_summary: str,
+    owns: Sequence[str],
+    conflict_zones: Sequence[str],
+) -> tuple[str, ...]:
+    if ticket_role == "docs":
+        return ()
+    haystack = " ".join((title, purpose, technical_summary)).lower()
+    paths = " ".join((*owns, *conflict_zones)).lower()
+    contracts: list[str] = []
+    if any(token in haystack for token in ("schema", "migration")) or any(
+        token in paths for token in ("db/migrations", "schema")
+    ):
+        contracts.append("schema")
+    if any(token in haystack for token in ("objective", "ticket", "dag", "ledger")):
+        contracts.append("objective-dag")
+    if any(token in paths for token in ("planning_steward.py", "work_ledger.py")):
+        contracts.append("objective-dag")
+    if "linear_mirror.py" in paths:
+        contracts.append("dispatch-mirror")
+    if any(token in haystack for token in ("backtest", "falsifier", "model run")):
+        contracts.append("backtest")
+    if any(token in paths for token in ("run_falsifier", "backtest")):
+        contracts.append("backtest")
+    if "reports/" in paths or "report" in haystack:
+        contracts.append("reporting")
+    if not contracts and ticket_role == "contract":
+        contracts.append(_slug(title))
+    return tuple(dict.fromkeys(contracts))
+
+
+def _slug(value: str) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
+    return slug or "default"
 
 
 def _ticket_title_continuation(lines: Sequence[str]) -> tuple[str, ...]:
@@ -1085,6 +1278,14 @@ def _ticket_markdown(index: int, ticket: TicketProposal) -> list[str]:
     return [
         f"{index}. {ticket.title}",
         "",
+        f"   Ticket Role: {ticket.ticket_role}",
+        "",
+        f"   Dependency Group: {ticket.dependency_group}",
+        "",
+        f"   Contracts Touched: {_comma_code(ticket.contracts_touched)}",
+        "",
+        f"   Risk Class: {ticket.risk_class or 'infer'}",
+        "",
         f"   Purpose: {ticket.purpose}",
         "",
         f"   Objective Impact: {ticket.objective_impact}",
@@ -1100,6 +1301,8 @@ def _ticket_markdown(index: int, ticket: TicketProposal) -> list[str]:
         f"   Conflict Zones: {_comma_code(ticket.conflict_zones)}",
         "",
         f"   Validation: {_comma_code(ticket.validation)}",
+        "",
+        f"   Proof Packet: {_comma_code(ticket.proof_packet)}",
         "",
     ]
 
@@ -1150,6 +1353,10 @@ def _source_markdown(source: ObjectiveSource) -> str:
 def _ticket_dict(ticket: TicketProposal) -> dict[str, object]:
     return {
         "title": ticket.title,
+        "ticket_role": ticket.ticket_role,
+        "dependency_group": ticket.dependency_group,
+        "contracts_touched": list(ticket.contracts_touched),
+        "risk_class": ticket.risk_class,
         "purpose": ticket.purpose,
         "objective_impact": ticket.objective_impact,
         "technical_summary": ticket.technical_summary,
@@ -1158,6 +1365,7 @@ def _ticket_dict(ticket: TicketProposal) -> dict[str, object]:
         "dependencies": list(ticket.dependencies),
         "conflict_zones": list(ticket.conflict_zones),
         "validation": list(ticket.validation),
+        "proof_packet": list(ticket.proof_packet),
     }
 
 

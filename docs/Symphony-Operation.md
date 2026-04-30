@@ -8,6 +8,9 @@ For upstream Symphony concepts, see OpenAI's Symphony article:
 
 For local setup commands, see [`SYMPHONY.md`](SYMPHONY.md).
 
+For the portable core design and build stages, see
+[`AGENTIC_BUILD_SYSTEM_CORE.md`](AGENTIC_BUILD_SYSTEM_CORE.md).
+
 ## Operating Model
 
 Symphony core currently watches Linear, creates isolated workspaces, starts
@@ -26,18 +29,21 @@ Linear = optional human-facing mirror
 Use this mental model:
 
 ```text
-Goal
-  -> Objective
-      -> Work Packet
-          -> Silver Tickets
-              -> PRs
-                  -> Merging
-                      -> Done or Rework
+Objective
+  -> Objective Compiler
+      -> Ticket DAG
+          -> Local Ledger
+              -> Linear/Symphony mirror
+                  -> PRs and proof packets
+                      -> Integration Steward or Safety Review
 ```
 
 Michael reviews Objectives and safety exceptions. The system handles ticket
 decomposition, execution, routine repair, merge shepherding, and proof-packet
 audit trails after a ticket is approved into `Todo`.
+
+Tickets are not the plan. Tickets are compiled output from an approved
+Objective. Symphony runs eligible tickets; it does not decide product direction.
 
 ## Roles
 
@@ -50,7 +56,7 @@ audit trails after a ticket is approved into `Todo`.
 | Admission steward | Promotes approved, unblocked `Backlog` tickets into `Todo` within capacity limits. |
 | Migration allocator | Serializes and reserves schema migration work. |
 | Merge steward | Queues safe green PRs and marks landed work `Done`. |
-| Conflict steward | Repairs stale/conflicting PRs or routes semantic conflicts to `Rework`. |
+| Integration steward | Repairs stale/conflicting PRs, reconciles routine drift, and routes semantic exceptions to `Safety Review`. |
 
 Some steward roles may start as manual scripts or manual Codex sessions before
 they become unattended automation.
@@ -87,9 +93,11 @@ The target Silver loop is continuous but bounded:
 4. Admission steward promotes safe, unblocked tickets to `Todo`.
 5. Symphony builds tickets up to the configured concurrency limit.
 6. Merge steward lands safe completed PRs.
-7. Conflict steward repairs mechanical conflicts and routes semantic conflicts
-   to `Rework` or `Safety Review`.
-8. Planning steward keeps the queue full from approved Objectives.
+7. Integration steward repairs stale branches, routine conflicts, and simple
+   drift using Objective context.
+8. Safety Gate routes destructive, semantic, security, paid/live, or scope-risk
+   exceptions to `Safety Review`.
+9. Planning steward keeps the queue full from approved Objectives.
 
 The rule is: keep the system full of coherent Objectives, not just busy agents.
 
@@ -197,6 +205,8 @@ The ledger stores:
 ```text
 objectives
 tickets
+ticket roles and dependency groups
+contracts touched
 ticket_events
 runs
 conflict_locks
@@ -266,7 +276,29 @@ Guardrails:
 Project laws, data safety, permissions, and irreversible actions to avoid.
 
 Expected Tickets:
-Likely implementation slices.
+Compiled ticket DAG with role metadata:
+
+- Ticket title
+  Ticket Role: contract | implementation | integration | validation | docs
+  Dependency Group: shared contract or feature group name
+  Contracts Touched:
+  - contract-name
+  Risk Class: low | migration | semantic | safety
+  Purpose: What this ticket makes true.
+  Expected Impact On Objective: How this moves the Objective forward.
+  Technical Summary: Concrete implementation mechanism.
+  Owns:
+  - files, modules, tables, or docs this ticket may edit
+  Do Not Touch:
+  - files, modules, tables, or docs outside scope
+  Dependencies:
+  - ticket title or ledger ticket id that must finish first
+  Conflict Zones:
+  - files, modules, tables, or docs likely to collide
+  Validation:
+  - commands or artifacts required for this ticket
+  Proof Packet:
+  - evidence the PR must return for integration and merge review
 
 Validation:
 Commands, artifacts, or evidence required before approval.
@@ -339,6 +371,19 @@ produce a reviewable PR.
 Each ticket should include:
 
 ```text
+Ticket Role:
+contract | implementation | integration | validation | docs.
+
+Dependency Group:
+The shared contract or feature group this ticket belongs to.
+
+Contracts Touched:
+Named contracts such as schema, objective-dag, backtest-run-registry, or
+falsifier-report.
+
+Risk Class:
+low | migration | semantic | safety.
+
 Purpose:
 What this ticket makes true.
 
@@ -491,9 +536,21 @@ Policy:
 ```text
 If active work is below target
 and Todo count is below buffer
-and an approved Objective has unblocked runnable tickets
+and an approved Objective has contract-stable runnable tickets
 then promote selected tickets from Backlog to Todo.
 ```
+
+Admission is not "one ticket at a time." It is contract-gated parallelism:
+
+```text
+contract tickets first
+then parallel implementation tickets
+then integration tickets
+then validation tickets
+```
+
+Multiple Objectives may run at once when their `contracts_touched` and hard
+conflict zones do not overlap.
 
 Default operating target:
 
@@ -508,8 +565,12 @@ only hard conflicts:
 
 ```text
 unfinished blocking relation
+unfinished contract in the same dependency group
+integration ticket waiting on implementation output
+validation ticket waiting on integration output
 open PR already exists for the same issue
 one active migration/schema-owner lane
+overlapping active contract change
 same high-risk steward/workflow file
 Safety Review required before start
 ```
@@ -600,10 +661,11 @@ available_at rules conflict
 data-retention behavior changes
 ```
 
-## Conflict Steward
+## Integration Steward
 
-The conflict steward handles stale branches, failed merge queue attempts, and
-merge conflicts.
+The integration steward handles routine post-Symphony repair in Objective
+context. It covers stale branches, failed merge queue attempts, merge conflicts,
+simple wiring drift between related tickets, and proof-packet refreshes.
 
 Mechanical conflicts may be repaired automatically:
 
@@ -615,7 +677,8 @@ migration number-only conflicts
 lockfile refresh caused by accepted dependency change
 ```
 
-Semantic conflicts must go to `Rework`:
+Semantic conflicts must go to `Safety Review` when they change the approved
+Objective contract or require Michael's judgment:
 
 ```text
 schema meaning
@@ -634,9 +697,10 @@ Conflict repair flow:
 3. Classify mechanical vs semantic.
 4. For mechanical conflicts, update branch, repair, run validation, and refresh
    the proof packet.
-5. For semantic conflicts, move the ticket to `Rework` with a clear summary.
+5. For semantic conflicts, move the ticket to `Safety Review` with a clear
+   summary.
 
-Rework summary should include:
+Repair or exception summary should include:
 
 ```text
 Objective:
@@ -688,6 +752,11 @@ Required contents:
 ```text
 PR link
 parent Objective
+ledger ticket ID
+ticket role
+dependency group
+contracts touched
+risk class
 Objective Impact summary
 changed files summary
 acceptance criteria status
@@ -769,7 +838,7 @@ previous rung produces good evidence.
 3. Planning steward creates tickets in `Backlog`.
 4. Admission steward promotes approved, low-risk tickets to `Todo`.
 5. Merge steward continuously handles safe completed PRs.
-6. Conflict steward repairs mechanical conflicts.
+6. Integration steward repairs routine conflicts and drift.
 7. Overnight mode keeps `Todo` topped up from approved Objectives.
 8. Michael review focuses on Objective outcomes and exception paths.
 

@@ -45,7 +45,7 @@ Use the strongest command that exists in the repo at the time:
 git diff --check
 python -m pytest
 ruff check .
-python scripts/run_falsifier.py --strategy momentum_12_1 --horizon 30 --universe falsifier_seed
+python scripts/run_falsifier.py --strategy momentum_12_1 --horizon 63 --universe falsifier_seed
 ```
 
 If a command is not yet available, say so plainly instead of inventing a pass.

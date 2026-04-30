@@ -76,6 +76,11 @@ headed `## Proof Packet` containing:
 
 - PR link.
 - Parent Objective, when the ticket belongs to one.
+- Ledger ticket ID.
+- Ticket Role: `contract`, `implementation`, `integration`, `validation`, or
+  `docs`.
+- Dependency Group and Contracts Touched.
+- Risk Class.
 - Objective Impact: 1-2 user-facing sentences explaining how this ticket moves
   the parent Objective forward.
 - Changed files summary.
