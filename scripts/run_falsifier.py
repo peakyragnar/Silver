@@ -10,6 +10,7 @@ import os
 import shutil
 import subprocess
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date, timedelta
 from pathlib import Path
@@ -728,17 +729,33 @@ def _label_scramble_payload(
             },
             False,
         )
+    if result.headline_metrics.scored_test_dates == 0:
+        return (
+            {
+                "status": "not_run",
+                "reason": "no scored walk-forward test rows were available",
+                "scored_row_source": "reported_scored_walk_forward_test_rows",
+                "selection_rule": "reported_top_half_selection_mask",
+                "seed": DEFAULT_LABEL_SCRAMBLE_SEED,
+                "trial_count": DEFAULT_LABEL_SCRAMBLE_TRIAL_COUNT,
+            },
+            False,
+        )
     try:
+        cost_fraction = result.round_trip_cost_bps / 10_000.0
         scramble_result = run_label_scramble(
-            _label_scramble_samples(rows),
+            _label_scramble_samples(rows, result),
             seed=DEFAULT_LABEL_SCRAMBLE_SEED,
             trial_count=DEFAULT_LABEL_SCRAMBLE_TRIAL_COUNT,
+            scoring_function=_selected_group_mean_net_return_scorer(cost_fraction),
         )
     except LabelScrambleInputError as exc:
         return (
             {
                 "status": "not_run",
                 "reason": str(exc),
+                "scored_row_source": "reported_scored_walk_forward_test_rows",
+                "selection_rule": "reported_top_half_selection_mask",
                 "seed": DEFAULT_LABEL_SCRAMBLE_SEED,
                 "trial_count": DEFAULT_LABEL_SCRAMBLE_TRIAL_COUNT,
             },
@@ -748,6 +765,18 @@ def _label_scramble_payload(
     payload = scramble_result.to_dict()
     payload["status"] = "completed"
     payload["alpha"] = LABEL_SCRAMBLE_ALPHA
+    payload["scored_row_source"] = "reported_scored_walk_forward_test_rows"
+    payload["selection_rule"] = "reported_top_half_selection_mask"
+    payload["eligible_observations"] = result.headline_metrics.eligible_observations
+    payload["selected_observations"] = result.headline_metrics.selected_observations
+    payload["scored_test_dates"] = result.headline_metrics.scored_test_dates
+    payload["reported_mean_strategy_net_horizon_return"] = (
+        result.headline_metrics.mean_strategy_net_return
+    )
+    payload["sample_feature_value"] = (
+        "1.0 when the ticker is selected by the reported strategy path; "
+        "0.0 otherwise"
+    )
     return (
         payload,
         result.status == "succeeded" and scramble_result.p_value <= LABEL_SCRAMBLE_ALPHA,
@@ -756,16 +785,90 @@ def _label_scramble_payload(
 
 def _label_scramble_samples(
     rows: Sequence[MomentumBacktestRow],
+    result: MomentumFalsifierResult,
 ) -> tuple[LabelScrambleSample, ...]:
-    return tuple(
-        LabelScrambleSample(
-            sample_id=f"{row.ticker}-{row.asof_date.isoformat()}",
-            feature_value=row.feature_value,
-            label_value=row.realized_return,
-            group_key=row.asof_date.isoformat(),
+    rows_by_date: dict[date, list[MomentumBacktestRow]] = {}
+    for row in rows:
+        rows_by_date.setdefault(row.asof_date, []).append(row)
+
+    samples: list[LabelScrambleSample] = []
+    for date_result in _date_results(result):
+        selected_tickers = set(date_result.selected_tickers)
+        if len(selected_tickers) != len(date_result.selected_tickers):
+            raise LabelScrambleInputError(
+                "reported strategy selection contains duplicate tickers for "
+                f"{date_result.asof_date.isoformat()}"
+            )
+        scored_rows = tuple(
+            sorted(
+                rows_by_date.get(date_result.asof_date, ()),
+                key=lambda row: row.ticker,
+            )
         )
-        for row in rows
-    )
+        if not scored_rows:
+            raise LabelScrambleInputError(
+                "reported scored test date has no matching feature/label rows: "
+                f"{date_result.asof_date.isoformat()}"
+            )
+        if len(scored_rows) != date_result.eligible_count:
+            raise LabelScrambleInputError(
+                "reported scored test date row count does not match "
+                "eligible_count for "
+                f"{date_result.asof_date.isoformat()}"
+            )
+        scored_tickers = {row.ticker for row in scored_rows}
+        missing_tickers = sorted(selected_tickers - scored_tickers)
+        if missing_tickers:
+            raise LabelScrambleInputError(
+                "reported selected tickers are missing from scored rows for "
+                f"{date_result.asof_date.isoformat()}: "
+                f"{', '.join(missing_tickers)}"
+            )
+
+        group_key = date_result.asof_date.isoformat()
+        for row in scored_rows:
+            samples.append(
+                LabelScrambleSample(
+                    sample_id=f"{row.ticker}-{group_key}",
+                    feature_value=1.0 if row.ticker in selected_tickers else 0.0,
+                    label_value=row.realized_return,
+                    group_key=group_key,
+                )
+            )
+
+    return tuple(samples)
+
+
+def _selected_group_mean_net_return_scorer(
+    cost_fraction: float,
+) -> Callable[[tuple[LabelScrambleSample, ...]], float]:
+    def selected_group_mean_net_return(
+        samples: tuple[LabelScrambleSample, ...],
+    ) -> float:
+        groups: dict[str, list[LabelScrambleSample]] = {}
+        for sample in samples:
+            groups.setdefault(sample.group_key, []).append(sample)
+        if not groups:
+            raise LabelScrambleInputError("label scramble requires scored test rows")
+
+        group_returns: list[float] = []
+        for group_key in sorted(groups):
+            selected_labels = [
+                sample.label_value
+                for sample in groups[group_key]
+                if sample.feature_value == 1.0
+            ]
+            if not selected_labels:
+                raise LabelScrambleInputError(
+                    "label scramble selection mask has no selected rows for "
+                    f"{group_key}"
+                )
+            group_returns.append(
+                sum(selected_labels) / len(selected_labels) - cost_fraction
+            )
+        return sum(group_returns) / len(group_returns)
+
+    return selected_group_mean_net_return
 
 
 def _date_results(result: MomentumFalsifierResult) -> tuple[MomentumDateResult, ...]:
