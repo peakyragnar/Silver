@@ -7,6 +7,7 @@ from silver.backtest.momentum_falsifier import (
     run_momentum_falsifier,
 )
 from silver.reports.falsifier import (
+    FalsifierEvidence,
     FalsifierFeatureMetadata,
     FalsifierInputCounts,
     FalsifierModelWindow,
@@ -95,6 +96,68 @@ def test_report_rendering_is_deterministic_and_contains_required_sections() -> N
                 "test_sessions": 2,
             },
         ),
+        evidence=FalsifierEvidence(
+            metrics_by_regime={
+                "pre_2019": {
+                    "start_date": "2014-01-01",
+                    "end_date": "2018-12-31",
+                    "sample_count": 12,
+                    "strategy_net_return": {
+                        "mean": 0.0123,
+                        "hit_rate": 0.75,
+                        "value_count": 12,
+                    },
+                    "baseline_net_return": {
+                        "mean": 0.0045,
+                        "hit_rate": 0.58,
+                        "value_count": 12,
+                    },
+                    "net_difference_vs_baseline": {
+                        "mean": 0.0078,
+                        "hit_rate": 0.67,
+                        "value_count": 12,
+                    },
+                },
+                "2020_dislocation": {
+                    "start_date": "2020-01-01",
+                    "end_date": "2020-12-31",
+                    "sample_count": 4,
+                    "strategy_net_return": {
+                        "mean": -0.001,
+                        "hit_rate": 0.25,
+                        "value_count": 4,
+                    },
+                    "baseline_net_return": {
+                        "mean": -0.002,
+                        "hit_rate": 0.25,
+                        "value_count": 4,
+                    },
+                    "net_difference_vs_baseline": {
+                        "mean": 0.001,
+                        "hit_rate": 0.5,
+                        "value_count": 4,
+                    },
+                },
+            },
+            label_scramble_metrics={
+                "status": "completed",
+                "scored_row_source": "scored_walk_forward_test_dates",
+                "selection_rule": "top_half_momentum_by_asof_date",
+                "score_name": "mean_net_difference_vs_baseline",
+                "alternative": "greater",
+                "sample_count": 16,
+                "group_count": 8,
+                "seed": 44,
+                "trial_count": 100,
+                "alpha": 0.05,
+                "observed_score": 0.42,
+                "observed_rank": 2,
+                "p_value": 0.0198,
+                "scramble_scores": (-0.1, 0.0, 0.1),
+            },
+            label_scramble_pass=True,
+            multiple_comparisons_correction="none",
+        ),
     )
 
     rendered = render_week_1_momentum_report(report)
@@ -107,6 +170,8 @@ def test_report_rendering_is_deterministic_and_contains_required_sections() -> N
     assert "## Train/Test Windows" in rendered
     assert "## Headline Metrics" in rendered
     assert "## Baseline Comparison" in rendered
+    assert "## Regime Breakdown" in rendered
+    assert "## Label-Scramble Result" in rendered
     assert "## Costs Assumption" in rendered
     assert "## Failure Modes" in rendered
     assert "## Reproducibility" in rendered
@@ -116,6 +181,30 @@ def test_report_rendering_is_deterministic_and_contains_required_sections() -> N
     assert "| model_run_key | model-run-momentum-12-1-202401 |" in rendered
     assert "| backtest_run_id | 202 |" in rendered
     assert "| backtest_run_key | backtest-run-momentum-12-1-202401 |" in rendered
+    assert "| Metadata field | backtest_runs.metrics_by_regime |" in rendered
+    assert (
+        "| pre_2019 | 2014-01-01 to 2018-12-31 | 12 | "
+        "1.2300% | 0.4500% | 0.7800% | 75.0000% |"
+    ) in rendered
+    assert (
+        "| 2020_dislocation | 2020-01-01 to 2020-12-31 | 4 | "
+        "-0.1000% | -0.2000% | 0.1000% | 25.0000% |"
+    ) in rendered
+    assert "| Metadata field | backtest_runs.label_scramble_metrics |" in rendered
+    assert "| Scored-row source | scored_walk_forward_test_dates |" in rendered
+    assert "| Selection rule | top_half_momentum_by_asof_date |" in rendered
+    assert "| Score | mean_net_difference_vs_baseline |" in rendered
+    assert "| Seed | 44 |" in rendered
+    assert "| Trial count | 100 |" in rendered
+    assert "| Alpha | 0.050000 |" in rendered
+    assert "| Observed score | 0.420000 |" in rendered
+    assert "| P-value | 0.019800 |" in rendered
+    assert "| Pass/fail | pass |" in rendered
+    assert (
+        "| Null summary | n=3, mean=0.000000, stddev=0.100000, "
+        "min=-0.100000, max=0.100000 |"
+    ) in rendered
+    assert "| Multiple-comparisons correction | none |" in rendered
     assert "| Git SHA | " + "f" * 40 + " |" in rendered
     assert "| Feature definition hash | " + "a" * 64 + " |" in rendered
     assert "| Feature set hash | " + "a" * 64 + " |" in rendered
