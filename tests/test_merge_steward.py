@@ -245,6 +245,76 @@ def test_safety_review_risks_move_to_safety_review(
     assert expected_reason in decision.reason
 
 
+def test_planned_contract_docs_only_pit_change_queues() -> None:
+    issue = _issue(
+        "ARR-56",
+        description=(
+            "Parent Objective: fix-falsifier-reproducibility-evidence\n"
+            "Ticket Role: contract\n\n"
+            "Owns:\n"
+            "- `SPEC.md`\n"
+            "- `docs/PIT_DISCIPLINE.md`\n\n"
+            "Do Not Touch:\n"
+            "- `scripts/run_falsifier.py`\n"
+        ),
+    )
+    pr = _pr(
+        64,
+        title="ARR-56 Define falsifier reproducibility evidence contract",
+        changed_files=_changed_files("SPEC.md", "docs/PIT_DISCIPLINE.md"),
+        diff=(
+            "diff --git a/docs/PIT_DISCIPLINE.md b/docs/PIT_DISCIPLINE.md\n"
+            "+++ b/docs/PIT_DISCIPLINE.md\n"
+            "+Falsifier evidence must use feature values visible at each asof_date.\n"
+            "diff --git a/SPEC.md b/SPEC.md\n"
+            "+++ b/SPEC.md\n"
+            "+Reports must expose available-at policy versions.\n"
+        ),
+    )
+
+    decision = merge_steward.decide_issue_action(
+        issue,
+        pr,
+        ("Python 3.10 checks",),
+    )
+
+    assert decision.action == "queue"
+    assert "planned contract docs-only PIT clarification" in decision.reason
+    assert "green" in decision.reason
+
+
+def test_contract_pit_doc_deletion_still_requires_safety_review() -> None:
+    issue = _issue(
+        "ARR-56",
+        description=(
+            "Ticket Role: contract\n\n"
+            "Owns:\n"
+            "- `docs/PIT_DISCIPLINE.md`\n"
+        ),
+    )
+    pr = _pr(
+        64,
+        title="ARR-56 Rewrite PIT contract",
+        changed_files=(
+            merge_steward.ChangedFile(
+                path="docs/PIT_DISCIPLINE.md",
+                additions=1,
+                deletions=1,
+            ),
+        ),
+        diff="+available_at is now optional for review-only reports\n",
+    )
+
+    decision = merge_steward.decide_issue_action(
+        issue,
+        pr,
+        ("Python 3.10 checks",),
+    )
+
+    assert decision.action == "move_safety_review"
+    assert "PIT rule change" in decision.reason
+
+
 def test_routine_docs_and_tests_still_queue() -> None:
     issue = _issue("ARR-41")
     pr = _pr(

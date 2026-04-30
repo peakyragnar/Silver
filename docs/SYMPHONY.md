@@ -270,6 +270,9 @@ Review risks from issue text, PR metadata, changed files, and available diffs,
 queues safe green PRs, marks merged PRs `Done`, sends conflicts or failed checks
 to `Rework`, and sends destructive, semantic, paid/live, security, scope-drift,
 or automation-permission exceptions to `Safety Review` with a blocker comment.
+The Objective-aware VCS reconciler may allow a narrower case before Linear is
+updated: additive docs-only PIT clarifications made by a `contract` ticket
+inside its declared `Owns` paths.
 
 Validate local wiring without network writes:
 

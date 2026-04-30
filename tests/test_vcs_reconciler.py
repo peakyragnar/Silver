@@ -198,6 +198,87 @@ def test_do_not_touch_scope_drift_moves_ticket_to_safety_review(
     assert ticket.status == "Safety Review"
 
 
+def test_planned_contract_docs_only_pit_change_can_move_to_merging(
+    tmp_path: Path,
+) -> None:
+    connection = _ledger_connection(tmp_path)
+    _insert_ticket(
+        connection,
+        ticket_id="portable-orchestration-core-001",
+        status="Safety Review",
+        linear_identifier="ARR-55",
+        ticket_role="contract",
+        owns=("docs/PIT_DISCIPLINE.md", "SPEC.md"),
+    )
+
+    actions = vcs_reconciler.reconcile_prs(
+        connection,
+        (
+            _pr(
+                61,
+                title="ARR-55 Define PIT evidence contract",
+                changed_files=_changed_files("docs/PIT_DISCIPLINE.md", "SPEC.md"),
+                diff=(
+                    "diff --git a/docs/PIT_DISCIPLINE.md b/docs/PIT_DISCIPLINE.md\n"
+                    "+++ b/docs/PIT_DISCIPLINE.md\n"
+                    "+Falsifier evidence must use feature values visible at each asof_date.\n"
+                    "diff --git a/SPEC.md b/SPEC.md\n"
+                    "+++ b/SPEC.md\n"
+                    "+Reports must expose available-at policy versions.\n"
+                ),
+            ),
+        ),
+        required_checks=("Python 3.10 checks",),
+        apply=True,
+    )
+
+    ticket = work_ledger.select_ticket(connection, "portable-orchestration-core-001")
+
+    assert [action.action for action in actions] == ["move_merging"]
+    assert "planned contract docs-only PIT clarification" in actions[0].reason
+    assert ticket.status == "Merging"
+
+
+def test_pit_doc_change_with_deletions_still_requires_safety_review(
+    tmp_path: Path,
+) -> None:
+    connection = _ledger_connection(tmp_path)
+    _insert_ticket(
+        connection,
+        ticket_id="portable-orchestration-core-001",
+        status="Merging",
+        linear_identifier="ARR-55",
+        ticket_role="contract",
+        owns=("docs/PIT_DISCIPLINE.md",),
+    )
+
+    actions = vcs_reconciler.reconcile_prs(
+        connection,
+        (
+            _pr(
+                61,
+                title="ARR-55 Rewrite PIT evidence contract",
+                changed_files=(
+                    merge_steward.ChangedFile(
+                        path="docs/PIT_DISCIPLINE.md",
+                        additions=1,
+                        deletions=1,
+                    ),
+                ),
+                diff="+available_at is now optional for review-only reports\n",
+            ),
+        ),
+        required_checks=("Python 3.10 checks",),
+        apply=True,
+    )
+
+    ticket = work_ledger.select_ticket(connection, "portable-orchestration-core-001")
+
+    assert [action.action for action in actions] == ["move_safety_review"]
+    assert "PIT rule change" in actions[0].reason
+    assert ticket.status == "Safety Review"
+
+
 def test_linear_identifier_matching_ignores_body_mentions_and_prefixes(
     tmp_path: Path,
 ) -> None:
@@ -247,6 +328,8 @@ def _insert_ticket(
     sequence: int = 1,
     status: str = "In Progress",
     linear_identifier: str | None = None,
+    ticket_role: str = "integration",
+    owns: tuple[str, ...] = ("scripts/vcs_reconciler.py",),
     do_not_touch: tuple[str, ...] = (),
 ) -> None:
     now = work_ledger.utc_now()
@@ -293,13 +376,13 @@ def _insert_ticket(
                 "Read PR state and update the local ledger.",
                 "The build system knows what landed after Symphony finishes.",
                 "Classify GitHub PRs in Objective context.",
-                "integration",
+                ticket_role,
                 "orchestration-core",
                 work_ledger.dumps_json(("objective-dag",)),
                 status,
                 "low",
                 "orchestration",
-                work_ledger.dumps_json(("scripts/vcs_reconciler.py",)),
+                work_ledger.dumps_json(owns),
                 work_ledger.dumps_json(do_not_touch),
                 work_ledger.dumps_json(()),
                 work_ledger.dumps_json(("scripts/",)),
