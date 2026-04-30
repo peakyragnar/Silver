@@ -223,7 +223,7 @@ def test_report_rendering_is_deterministic_and_contains_required_sections() -> N
         "\"round_trip_cost_bps\":20.0,\"step_sessions\":2,\"test_sessions\":2}`"
         " |"
     ) in rendered
-    assert "| Report schema version | 4 |" in rendered
+    assert "| Report schema version | 3 |" in rendered
 
 
 def test_missing_prerequisite_message_names_materialization_step() -> None:

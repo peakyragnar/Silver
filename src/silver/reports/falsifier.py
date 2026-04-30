@@ -12,7 +12,7 @@ from silver.backtest.momentum_falsifier import MomentumBacktestRow
 from silver.backtest.momentum_falsifier import MomentumFalsifierResult
 
 
-REPORT_SCHEMA_VERSION = 4
+REPORT_SCHEMA_VERSION = 3
 
 
 @dataclass(frozen=True, slots=True)
