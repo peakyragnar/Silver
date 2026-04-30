@@ -249,6 +249,47 @@ def test_report_traceability_validation_fails_clearly_on_metadata_mismatch(
     assert not (tmp_path / "report.md").exists()
 
 
+def test_report_traceability_validation_rejects_backtest_joined_to_wrong_model_run(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    calendar = _calendar()
+    repo = FakeMetadataRepository(
+        traceability_overrides={"backtest_model_run_id": 999},
+    )
+    args = cli.parse_args(
+        [
+            "--database-url",
+            "postgresql://user:pass@localhost/silver",
+            "--output-path",
+            str(tmp_path / "report.md"),
+        ]
+    )
+    monkeypatch.setattr(cli, "_git_sha", lambda: "abcdef0")
+    monkeypatch.setattr(cli, "run_label_scramble", _fake_label_scramble)
+    monkeypatch.setattr(
+        cli,
+        "load_persisted_inputs",
+        lambda *_args, **_kwargs: _persisted_inputs(
+            rows=_momentum_rows(calendar, session_count=420),
+        ),
+    )
+
+    with pytest.raises(
+        cli.FalsifierCliError,
+        match="backtest_runs.model_run_id",
+    ):
+        cli.run_report_with_metadata(
+            args,
+            client=object(),
+            metadata_repository=repo,
+            calendar=calendar,
+        )
+
+    assert repo.traceability_loads == [2]
+    assert not (tmp_path / "report.md").exists()
+
+
 @pytest.mark.parametrize(
     ("traceability_overrides", "expected_field"),
     (
