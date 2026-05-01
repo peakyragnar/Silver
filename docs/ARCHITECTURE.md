@@ -136,6 +136,10 @@ backtest rows back into the hypothesis registry.
 - Candidate materialization remains in the feature-store layer. It may read
   normalized prices and point-in-time universe membership, but it must not read
   labels, backtest metrics, or hypothesis outcomes.
+- The first configured feature families are adjusted-close returns, average
+  dollar volume, and realized volatility. Price-return variants are separate
+  feature definitions so different formation windows produce distinct feature
+  hashes and replay identities.
 - Candidate YAML owns hypothesis identity, prose, source feature, selection
   direction, and materializer name. Python owns the allow-listed materializer
   implementations and validates that each `source_feature` matches the selected

@@ -132,6 +132,11 @@ evaluation:
 
 - `momentum_12_1`, where high values are selected
 - `avg_dollar_volume_63`, where high values are selected
+- `momentum_6_1`, where high values are selected
+- `momentum_3_0`, which uses the persisted `return_63_0` feature and selects
+  high values
+- `short_reversal_21_0`, which uses the persisted `return_21_0` feature and
+  tells the falsifier to select low values
 - `low_realized_volatility_63`, which uses the persisted
   `realized_volatility_63` feature and tells the falsifier to select low values
 

@@ -133,6 +133,10 @@ deterministic model and backtest identity must distinguish non-default
 default, so replaying a low-volatility candidate cannot silently become a
 high-volatility candidate.
 
+Feature-family tests should cover each new allow-listed materializer before it
+is added to `config/feature_candidates.yaml`, including no-lookahead behavior at
+the daily price availability boundary.
+
 ## Reporting
 
 Backtest reports must include gross and net metrics, baseline comparison,

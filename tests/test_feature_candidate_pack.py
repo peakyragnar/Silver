@@ -56,6 +56,9 @@ def test_feature_candidate_pack_v1_keys_are_stable() -> None:
     assert feature_candidate_keys() == (
         "momentum_12_1",
         "avg_dollar_volume_63",
+        "momentum_6_1",
+        "momentum_3_0",
+        "short_reversal_21_0",
         "low_realized_volatility_63",
     )
 
@@ -162,6 +165,40 @@ def test_materialize_low_realized_volatility_candidate_writes_feature_value() ->
     assert stored.source_metadata["candidate_key"] == "low_realized_volatility_63"
     assert stored.source_metadata["selection_direction"] == "low"
     assert stored.source_metadata["window"]["return_count"] == 63
+
+
+def test_materialize_short_reversal_candidate_writes_price_return_value() -> None:
+    candidate = feature_candidate_by_key("short_reversal_21_0")
+    calendar_rows, sessions = _calendar_rows(date(2024, 1, 2), session_count=22)
+    repository = FakeCandidateRepository(
+        candidate=candidate,
+        calendar_rows=calendar_rows,
+        prices={
+            SECURITY_ID: [
+                _price(sessions[0], Decimal("100.00")),
+                _price(sessions[-1], Decimal("90.00")),
+            ]
+        },
+    )
+
+    summary = materialize_feature_candidate(
+        repository,
+        candidate,
+        universe_name="falsifier_seed",
+        start_date=None,
+        end_date=None,
+        computed_by_run_id=90,
+    )
+
+    assert summary.values_written == 1
+    assert summary.skipped_by_reason == {"insufficient_history": 21}
+    [stored] = repository.feature_values.values()
+    assert stored.value == -0.1
+    assert stored.asof_date == sessions[-1]
+    assert stored.source_metadata["candidate_key"] == "short_reversal_21_0"
+    assert stored.source_metadata["selection_direction"] == "low"
+    assert stored.source_metadata["window"]["lookback_sessions"] == 21
+    assert stored.source_metadata["window"]["skip_recent_sessions"] == 0
 
 
 def test_candidate_pack_builds_low_direction_falsifier_command() -> None:

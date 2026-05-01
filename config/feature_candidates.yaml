@@ -27,6 +27,45 @@ candidates:
       broader participation.
     notes: Trailing 63-session average of adjusted close times volume.
 
+  - hypothesis_key: momentum_6_1
+    name: Momentum 6-1
+    source_feature: momentum_6_1
+    materializer: momentum_6_1
+    selection_direction: high
+    thesis: >-
+      Securities with stronger prior 6-month returns, skipping the most recent
+      month, may continue to outperform over the next quarter.
+    mechanism: >-
+      A shorter trend window can capture fresher relative-strength effects while
+      still avoiding the latest month of possible reversal noise.
+    notes: Deterministic 6-1 simple-return momentum from adjusted closes.
+
+  - hypothesis_key: momentum_3_0
+    name: Momentum 3-0
+    source_feature: return_63_0
+    materializer: return_63_0
+    selection_direction: high
+    thesis: >-
+      Securities with stronger trailing 3-month returns may continue to
+      outperform over the next quarter.
+    mechanism: >-
+      Recent relative strength may reflect improving fundamentals, investor
+      attention, or persistent flows not yet fully incorporated into prices.
+    notes: Trailing 63-session simple return from adjusted closes.
+
+  - hypothesis_key: short_reversal_21_0
+    name: Short Reversal 21-0
+    source_feature: return_21_0
+    materializer: return_21_0
+    selection_direction: low
+    thesis: >-
+      Securities with weaker trailing 1-month returns may rebound over the next
+      quarter.
+    mechanism: >-
+      Short-horizon underperformance can reflect temporary pressure, liquidity
+      shocks, or overreaction that partially reverses after formation.
+    notes: Trailing 21-session simple return from adjusted closes.
+
   - hypothesis_key: low_realized_volatility_63
     name: Low Realized Volatility 63
     source_feature: realized_volatility_63

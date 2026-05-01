@@ -27,6 +27,17 @@ from silver.features.momentum_12_1 import (
     compute_momentum_12_1,
     daily_price_available_at,
 )
+from silver.features.price_return import (
+    MOMENTUM_6_1_DEFINITION,
+    MOMENTUM_6_1_LOOKBACK_SESSIONS,
+    RETURN_21_0_DEFINITION,
+    RETURN_21_0_LOOKBACK_SESSIONS,
+    RETURN_63_0_DEFINITION,
+    RETURN_63_0_LOOKBACK_SESSIONS,
+    compute_momentum_6_1,
+    compute_return_21_0,
+    compute_return_63_0,
+)
 from silver.features.realized_volatility import (
     REALIZED_VOLATILITY_63_DEFINITION,
     RETURN_WINDOW_SESSIONS,
@@ -48,6 +59,9 @@ DEFAULT_CANDIDATE_CONFIG_PATH = ROOT / "config" / "feature_candidates.yaml"
 SelectionDirection = Literal["high", "low"]
 CandidateMaterializer = Literal[
     "momentum_12_1",
+    "momentum_6_1",
+    "return_63_0",
+    "return_21_0",
     "avg_dollar_volume_63",
     "realized_volatility_63",
 ]
@@ -130,6 +144,9 @@ _MATERIALIZER_FEATURE_DEFINITIONS: dict[
     NumericFeatureDefinition,
 ] = {
     "momentum_12_1": MOMENTUM_12_1_DEFINITION,
+    "momentum_6_1": MOMENTUM_6_1_DEFINITION,
+    "return_63_0": RETURN_63_0_DEFINITION,
+    "return_21_0": RETURN_21_0_DEFINITION,
     "avg_dollar_volume_63": AVG_DOLLAR_VOLUME_63_DEFINITION,
     "realized_volatility_63": REALIZED_VOLATILITY_63_DEFINITION,
 }
@@ -389,6 +406,46 @@ def _materialize_price_only_candidate(
                     prices=observations,
                     calendar=calendar,
                 )
+            elif candidate.materializer in (
+                "momentum_6_1",
+                "return_63_0",
+                "return_21_0",
+            ):
+                start_offset, end_offset = _price_return_offsets(
+                    candidate.materializer
+                )
+                observations = _price_return_boundary_prices(
+                    security_prices=security_prices,
+                    session_dates=session_dates,
+                    session_index=session_index,
+                    asof_date=asof_date,
+                    start_offset=start_offset,
+                    end_offset=end_offset,
+                )
+                if observations is None:
+                    skipped["insufficient_history"] += 1
+                    continue
+                if candidate.materializer == "momentum_6_1":
+                    result = compute_momentum_6_1(
+                        security_id=membership.security_id,
+                        asof=asof,
+                        prices=observations,
+                        calendar=calendar,
+                    )
+                elif candidate.materializer == "return_63_0":
+                    result = compute_return_63_0(
+                        security_id=membership.security_id,
+                        asof=asof,
+                        prices=observations,
+                        calendar=calendar,
+                    )
+                else:
+                    result = compute_return_21_0(
+                        security_id=membership.security_id,
+                        asof=asof,
+                        prices=observations,
+                        calendar=calendar,
+                    )
             else:  # pragma: no cover - guarded by caller branch.
                 raise FeatureStoreError(f"unsupported candidate {candidate.materializer}")
 
@@ -557,6 +614,42 @@ def _rolling_price_window(
         price
         for window_date in window_dates
         for price in [security_prices.get(window_date)]
+        if price is not None
+    )
+
+
+def _price_return_offsets(
+    materializer: CandidateMaterializer,
+) -> tuple[int, int]:
+    if materializer == "momentum_6_1":
+        return MOMENTUM_6_1_LOOKBACK_SESSIONS, SKIP_RECENT_SESSIONS
+    if materializer == "return_63_0":
+        return RETURN_63_0_LOOKBACK_SESSIONS, 0
+    if materializer == "return_21_0":
+        return RETURN_21_0_LOOKBACK_SESSIONS, 0
+    raise FeatureStoreError(f"unsupported price-return materializer {materializer}")
+
+
+def _price_return_boundary_prices(
+    *,
+    security_prices: Mapping[date, AdjustedDailyPriceObservation],
+    session_dates: Sequence[date],
+    session_index: Mapping[date, int],
+    asof_date: date,
+    start_offset: int,
+    end_offset: int,
+) -> tuple[AdjustedDailyPriceObservation, ...] | None:
+    index = session_index[asof_date]
+    if index < start_offset or index < end_offset:
+        return None
+    boundary_dates = (
+        session_dates[index - start_offset],
+        session_dates[index - end_offset],
+    )
+    return tuple(
+        price
+        for boundary_date in boundary_dates
+        for price in [security_prices.get(boundary_date)]
         if price is not None
     )
 
