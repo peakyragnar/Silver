@@ -270,6 +270,20 @@ feature values already in the database.
 Use `--candidate <hypothesis_key>` to run one configured candidate, repeat it
 to run several, or omit it to run the full configured pack.
 
+To run the harder walk-forward rollup for the configured pack, use:
+
+```bash
+python scripts/run_feature_candidate_walk_forward.py --check
+python scripts/run_feature_candidate_walk_forward.py --universe falsifier_seed --horizon 63
+```
+
+This runner refreshes candidates unless `--skip-materialize` is passed, runs
+the same replayable falsifier per candidate, reads the persisted
+`walk_forward_windows` from `backtest_runs.metrics`, and prints a consistency
+scoreboard. A candidate must have enough scored windows, beat the equal-weight
+baseline in a sufficient share of windows, and still pass label scramble before
+the registry can treat it as promising.
+
 This registry is navigation memory. The authoritative evidence remains the
 linked `backtest_runs` and `model_runs` metadata plus replay proof.
 Recording an evaluation moves the hypothesis status to `promising`,

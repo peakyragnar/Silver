@@ -156,6 +156,11 @@ backtest rows back into the hypothesis registry.
 - The candidate pack can upsert hypotheses and record evaluations, but the
   authoritative evidence remains the linked `backtest_runs` and `model_runs`
   rows plus replay validation.
+- Harder Falsifier v1 persists the falsifier's split-level
+  `walk_forward_windows` inside model/backtest metrics and adds a pack-level
+  runner that rejects candidates whose window-level performance is unstable
+  before registry promotion. This is still exploratory evidence, not an
+  acceptance gate replacement.
 
 For a clean local Postgres database, prefer the single bootstrap command:
 

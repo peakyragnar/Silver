@@ -54,6 +54,7 @@ EXPECTED_REPO_PATHS: tuple[ExpectedPath, ...] = (
     ExpectedPath("scripts/materialize_forward_labels.py", "file"),
     ExpectedPath("scripts/materialize_momentum_12_1.py", "file"),
     ExpectedPath("scripts/run_falsifier.py", "file"),
+    ExpectedPath("scripts/run_feature_candidate_walk_forward.py", "file"),
     ExpectedPath("reports/falsifier", "dir"),
     ExpectedPath("docs/PHASE1_RUNBOOK.md", "file"),
 )

@@ -129,10 +129,16 @@ def test_report_run_creates_and_finishes_model_and_backtest_success(
     assert model_finish.status == "succeeded"
     assert model_finish.metrics["split_count"] > 0
     assert model_finish.metrics["status"] == "succeeded"
+    assert model_finish.metrics["walk_forward_windows"]
+    assert (
+        model_finish.metrics["walk_forward_windows"][0]["net_difference_vs_baseline"]
+        is not None
+    )
 
     _backtest_run_id, backtest_finish = repo.backtest_finishes[0]
     assert backtest_finish.status == "succeeded"
     assert backtest_finish.metrics["mean_strategy_net_horizon_return"] is not None
+    assert backtest_finish.metrics["walk_forward_windows"]
     assert backtest_finish.metrics_by_regime
     assert "equal_weight_universe" in backtest_finish.baseline_metrics
     assert backtest_finish.label_scramble_metrics["status"] == "completed"

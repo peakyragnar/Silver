@@ -1085,6 +1085,13 @@ includes adjusted-close return windows, liquidity, and realized-volatility
 candidates. Family-level multiple-comparisons correction remains a required
 promotion gate before any candidate moves beyond exploratory evidence.
 
+Harder Falsifier v1 adds a walk-forward consistency rollup over each configured
+candidate. The falsifier must persist split-level `walk_forward_windows` in the
+durable model/backtest metrics, and the pack-level runner must reject candidates
+that do not beat the equal-weight baseline across enough windows even if their
+aggregate headline metric looks favorable. Label-scramble remains a separate
+required gate.
+
 **validated → live:** at least 3 months of paper-trading performance consistent with backtest expectation (within 30% of expected Sharpe).
 
 **live → retired:** performance drift exceeds threshold (e.g., 90-day rolling Sharpe < 50% of backtest Sharpe), OR signal IC turns negative, OR capacity falls below threshold.

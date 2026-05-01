@@ -1261,6 +1261,7 @@ def _metrics_payload(
         "strategy_net_hit_rate": metrics.strategy_net_hit_rate,
         "strategy_net_return_stddev": metrics.strategy_net_return_stddev,
         "strategy_net_return_to_stddev": metrics.strategy_net_return_to_stddev,
+        "walk_forward_windows": _walk_forward_windows_payload(result),
     }
 
 
@@ -1283,6 +1284,33 @@ def _baseline_metrics(
             "mean_net_difference": metrics.mean_net_difference_vs_baseline,
         },
     }
+
+
+def _walk_forward_windows_payload(
+    result: MomentumFalsifierResult,
+) -> list[dict[str, object]]:
+    return [
+        {
+            "split_index": window.split_index,
+            "train_start": window.train_start.isoformat(),
+            "train_end": window.train_end.isoformat(),
+            "test_start": window.test_start.isoformat(),
+            "test_end": window.test_end.isoformat(),
+            "train_observations": window.train_observations,
+            "test_observations": window.test_observations,
+            "scored_dates": window.scored_dates,
+            "selected_observations": window.selected_observations,
+            "strategy_net_return": window.strategy_net_return,
+            "baseline_net_return": window.baseline_net_return,
+            "net_difference_vs_baseline": (
+                window.strategy_net_return - window.baseline_net_return
+                if window.strategy_net_return is not None
+                and window.baseline_net_return is not None
+                else None
+            ),
+        }
+        for window in result.windows
+    ]
 
 
 def _metrics_by_regime(
@@ -2173,6 +2201,7 @@ def _model_run_metrics(result: Any) -> Mapping[str, Any]:
         "strategy_net_hit_rate": metrics.strategy_net_hit_rate,
         "strategy_net_return_stddev": metrics.strategy_net_return_stddev,
         "strategy_net_return_to_stddev": metrics.strategy_net_return_to_stddev,
+        "walk_forward_windows": _walk_forward_windows_payload(result),
     }
 
 

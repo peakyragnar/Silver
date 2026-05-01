@@ -41,6 +41,7 @@ python scripts/materialize_momentum_12_1.py --check
 python scripts/materialize_feature_candidates.py --check
 python scripts/check_falsifier_inputs.py --check
 python scripts/run_feature_candidate_pack.py --check
+python scripts/run_feature_candidate_walk_forward.py --check
 python -m pytest
 ruff check .
 ```
@@ -136,6 +137,11 @@ high-volatility candidate.
 Feature-family tests should cover each new allow-listed materializer before it
 is added to `config/feature_candidates.yaml`, including no-lookahead behavior at
 the daily price availability boundary.
+
+Harder walk-forward candidate tests must prove that split-level window metrics
+are persisted, the pack-level consistency rollup rejects unstable candidates,
+and label-scramble failure still prevents registry promotion even when the
+walk-forward rollup passes.
 
 ## Reporting
 
