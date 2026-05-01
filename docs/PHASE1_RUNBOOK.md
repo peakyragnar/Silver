@@ -178,7 +178,48 @@ and names the drifted field, such as `backtest_runs.metrics`. Use
 than the numeric id. A `model_run_id` alone is not accepted for full replay
 because one model run can support multiple backtest claims.
 
-## 6. Read The Report
+## 6. Register The Hypothesis
+
+After a falsifier run and replay pass, record the testable idea in the
+hypothesis registry and link it to the durable backtest evidence. Validate the
+CLI first:
+
+```bash
+python scripts/manage_hypotheses.py check
+```
+
+Seed the Phase 1 momentum hypothesis:
+
+```bash
+python scripts/manage_hypotheses.py seed-momentum
+```
+
+Then link the latest successful falsifier run for the same strategy, universe,
+and horizon:
+
+```bash
+python scripts/manage_hypotheses.py record-latest-falsifier --notes "replay matched"
+```
+
+You can also link an explicit durable backtest identity:
+
+```bash
+python scripts/manage_hypotheses.py record-backtest --backtest-run-id 3
+```
+
+Inspect the current registry:
+
+```bash
+python scripts/manage_hypotheses.py list
+```
+
+This registry is navigation memory. The authoritative evidence remains the
+linked `backtest_runs` and `model_runs` metadata plus replay proof.
+Recording an evaluation moves the hypothesis status to `promising`,
+`rejected`, `accepted`, or `running`; failed backtest execution does not by
+itself retire a hypothesis.
+
+## 7. Read The Report
 
 Start with `Status`, `Data Coverage`, and `Failure Modes`. Then check
 `Headline Metrics`, `Baseline Comparison`, `Costs Assumption`, and

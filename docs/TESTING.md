@@ -97,6 +97,24 @@ not an accepted backtest claim; tests should assert it sets `finished_at`,
 records deterministic insufficiency metadata, and satisfies the shipped
 `label_scramble_pass` constraint without reporting alpha.
 
+## Hypothesis Registry
+
+Hypothesis registry tests must prove a candidate can be seeded, linked to a
+durable `backtest_run_id`, and listed with its latest evaluation. The registry
+may summarize whether evidence looks `promising`, `rejected`, `running`, or
+`failed`, but tests must keep the replayable backtest row as the source of
+truth. In particular:
+
+- `succeeded` backtests with passing label-scramble evidence may be summarized
+  as `promising`.
+- `succeeded` backtests with failed label-scramble evidence must be summarized
+  as `rejected` with a deterministic failure reason.
+- `failed` and `insufficient_data` backtests must not become accepted evidence.
+- Tests must reject unknown hypothesis keys and missing backtest rows rather
+  than creating detached evaluation notes.
+- CLI rendering tests should prove the operator can see the latest linked
+  backtest identity without querying Postgres by hand.
+
 ## Reporting
 
 Backtest reports must include gross and net metrics, baseline comparison,

@@ -272,6 +272,62 @@ PHASE2_BACKTEST_METADATA_REPLAY_REQUIRED_SNIPPETS = (
         "'{}'::jsonb ) ) not valid"
     ),
 )
+HYPOTHESIS_REGISTRY_MIGRATION = "007_hypothesis_registry.sql"
+HYPOTHESIS_REGISTRY_TABLES = (
+    "hypotheses",
+    "hypothesis_evaluations",
+)
+HYPOTHESIS_REGISTRY_COLUMNS = {
+    "hypotheses": (
+        "hypothesis_key",
+        "name",
+        "thesis",
+        "signal_name",
+        "mechanism",
+        "universe_name",
+        "horizon_days",
+        "target_kind",
+        "status",
+        "metadata",
+        "created_at",
+        "updated_at",
+    ),
+    "hypothesis_evaluations": (
+        "hypothesis_id",
+        "model_run_id",
+        "backtest_run_id",
+        "evaluation_status",
+        "failure_reason",
+        "notes",
+        "summary_metrics",
+        "created_at",
+        "updated_at",
+    ),
+}
+HYPOTHESIS_REGISTRY_REQUIRED_SNIPPETS = (
+    "unique (hypothesis_key)",
+    "unique (hypothesis_id, backtest_run_id)",
+    "references silver.hypotheses(id) on delete restrict",
+    "references silver.model_runs(id) on delete restrict",
+    "references silver.backtest_runs(id) on delete restrict",
+    "check (jsonb_typeof(metadata) = 'object')",
+    "check (jsonb_typeof(summary_metrics) = 'object')",
+)
+HYPOTHESIS_STATUSES = (
+    "proposed",
+    "running",
+    "rejected",
+    "promising",
+    "accepted",
+    "retired",
+)
+HYPOTHESIS_EVALUATION_STATUSES = (
+    "running",
+    "rejected",
+    "promising",
+    "accepted",
+    "failed",
+)
 
 
 class MigrationError(RuntimeError):
@@ -366,6 +422,8 @@ def validate_static_schema(migrations: Sequence[Migration]) -> None:
         validate_phase2_backtest_metadata_schema(migrations[3])
     if len(migrations) >= 5:
         validate_phase2_backtest_metadata_replay_schema(migrations[4])
+    if len(migrations) >= 7:
+        validate_hypothesis_registry_schema(migrations[6])
 
 
 def validate_phase1_analytics_schema(migration: Migration) -> None:
@@ -440,6 +498,65 @@ def validate_phase2_backtest_metadata_replay_schema(migration: Migration) -> Non
             raise MigrationError(
                 f"{PHASE2_BACKTEST_METADATA_REPLAY_MIGRATION} is missing "
                 f"required SQL: {snippet}"
+            )
+
+
+def validate_hypothesis_registry_schema(migration: Migration) -> None:
+    if migration.path.name != HYPOTHESIS_REGISTRY_MIGRATION:
+        raise MigrationError(
+            "seventh migration must be "
+            f"db/migrations/{HYPOTHESIS_REGISTRY_MIGRATION}"
+        )
+
+    sql = migration.sql
+    tables = tuple(match.lower() for match in TABLE_RE.findall(sql))
+    if tables != HYPOTHESIS_REGISTRY_TABLES:
+        raise MigrationError(
+            f"{HYPOTHESIS_REGISTRY_MIGRATION} must create exactly the "
+            f"hypothesis registry tables {HYPOTHESIS_REGISTRY_TABLES}; "
+            f"found {tables}"
+        )
+
+    for table, columns in HYPOTHESIS_REGISTRY_COLUMNS.items():
+        body = _table_body(sql, table)
+        for column in columns:
+            if not re.search(rf"\b{re.escape(column)}\b", body, re.I):
+                raise MigrationError(f"silver.{table} is missing column {column}")
+
+    normalized_sql = _normalize_sql(sql)
+    for snippet in HYPOTHESIS_REGISTRY_REQUIRED_SNIPPETS:
+        if snippet not in normalized_sql:
+            raise MigrationError(
+                f"{HYPOTHESIS_REGISTRY_MIGRATION} is missing required SQL: "
+                f"{snippet}"
+            )
+
+    _require_status_check(
+        normalized_sql,
+        "status",
+        HYPOTHESIS_STATUSES,
+        HYPOTHESIS_REGISTRY_MIGRATION,
+    )
+    _require_status_check(
+        normalized_sql,
+        "evaluation_status",
+        HYPOTHESIS_EVALUATION_STATUSES,
+        HYPOTHESIS_REGISTRY_MIGRATION,
+    )
+
+
+def _require_status_check(
+    normalized_sql: str,
+    column: str,
+    statuses: Sequence[str],
+    migration_name: str,
+) -> None:
+    if f"check ( {column} in (" not in normalized_sql:
+        raise MigrationError(f"{migration_name} must check {column} values")
+    for status in statuses:
+        if f"'{status}'" not in normalized_sql:
+            raise MigrationError(
+                f"{migration_name} {column} check is missing status {status}"
             )
 
 

@@ -104,6 +104,29 @@ Runtime writers must treat migrations `004_backtest_metadata.sql` and
   report paths, timestamps, UUIDs, process ids, host/user names, or database
   surrogate ids.
 
+Phase 3 starts the hypothesis registry with `silver.hypotheses` and
+`silver.hypothesis_evaluations`. These tables are the bridge between a human or
+agent idea and replayable backtest evidence:
+
+- `hypotheses.hypothesis_key` is the stable external identifier for a testable
+  candidate, such as `momentum_12_1`.
+- A hypothesis stores the thesis, signal name, expected mechanism, optional
+  universe, horizon, target kind, status, and JSON metadata. It does not store
+  price data, labels, predictions, or validation decisions.
+- `hypothesis_evaluations` links one hypothesis to one durable
+  `backtest_runs` row and the joined `model_runs` row. The backtest remains the
+  source of truth for costs, baselines, policy versions, replay inputs, and
+  metrics.
+- Evaluation status is a summary of the backtest evidence for navigation:
+  `running`, `rejected`, `promising`, `accepted`, or `failed`. It must never
+  replace replay validation or statistical acceptance gates.
+- Recording an evaluation moves the hypothesis lifecycle status to the latest
+  non-failed evidence state. Reseeding a known hypothesis must preserve that
+  lifecycle status rather than resetting it to `proposed`.
+- A hypothesis can be proposed and linked manually before any autonomous
+  proposal loop exists. Automation should only build on this registry after the
+  manual path is observable and repeatable.
+
 For a clean local Postgres database, prefer the single bootstrap command:
 
 ```bash

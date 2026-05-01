@@ -689,32 +689,48 @@ setting, cost assumptions, and contract version.
 
 ### 7.11 Hypotheses
 
+The implemented hypothesis registry v0 stores testable candidate ideas and the
+replayable backtest evidence currently attached to each idea. Lifecycle-event
+automation can be added later, but the manual operator path comes first.
+
 ```sql
 CREATE TABLE silver.hypotheses (
     id              bigserial PRIMARY KEY,
-    name            text NOT NULL UNIQUE,
-    definition      jsonb NOT NULL,         -- structured rule
-    status          text NOT NULL DEFAULT 'candidate',
-                                            -- candidate, validated, live, retired
+    hypothesis_key  text NOT NULL UNIQUE,
+    name            text NOT NULL,
+    thesis          text NOT NULL,
+    signal_name     text NOT NULL,
+    mechanism       text NOT NULL,
+    universe_name   text,
+    horizon_days    integer,
+    target_kind     text,
+    status          text NOT NULL DEFAULT 'proposed',
+                    -- proposed, running, rejected, promising, accepted, retired
+    metadata        jsonb NOT NULL DEFAULT '{}'::jsonb,
     created_at      timestamptz NOT NULL DEFAULT now(),
-    validated_at    timestamptz,
-    activated_at    timestamptz,
-    retired_at      timestamptz,
-    retirement_reason text,
-    proposer        text NOT NULL,          -- 'human', 'llm:claude-sonnet-4-7', etc.
-    critic_verdict  jsonb,                  -- adversarial critic output
-    notes           text
+    updated_at      timestamptz NOT NULL DEFAULT now()
 );
 
-CREATE TABLE silver.hypothesis_lifecycle_events (
+CREATE TABLE silver.hypothesis_evaluations (
     id              bigserial PRIMARY KEY,
     hypothesis_id   bigint NOT NULL REFERENCES silver.hypotheses(id),
-    event_type      text NOT NULL,          -- proposed, critiqued, validated, promoted, retired
-    actor           text NOT NULL,
-    details         jsonb,
-    occurred_at     timestamptz NOT NULL DEFAULT now()
+    model_run_id    bigint NOT NULL REFERENCES silver.model_runs(id),
+    backtest_run_id bigint NOT NULL REFERENCES silver.backtest_runs(id),
+    evaluation_status text NOT NULL,
+                    -- running, rejected, promising, accepted, failed
+    failure_reason  text,
+    notes           text,
+    summary_metrics jsonb NOT NULL DEFAULT '{}'::jsonb,
+    created_at      timestamptz NOT NULL DEFAULT now(),
+    updated_at      timestamptz NOT NULL DEFAULT now(),
+    UNIQUE (hypothesis_id, backtest_run_id)
 );
 ```
+
+An evaluation is not the canonical backtest result. It is an index row pointing
+from a hypothesis to `backtest_runs`, whose joined `model_runs` row remains the
+source of truth for costs, baselines, feature identity, policy versions, replay
+inputs, and report-critical metrics.
 
 ### 7.12 Portfolios and execution
 

@@ -205,3 +205,27 @@ def test_analytics_run_kind_expansion_migration_allows_falsifier_invocations() -
     assert "drop constraint analytics_runs_run_kind_check" in sql
     assert "add constraint analytics_runs_run_kind_check" in sql
     assert "'falsifier_report_invocation'" in sql
+
+
+def test_hypothesis_registry_migration_static_expectations() -> None:
+    migrations = apply_migrations.check_migrations(ROOT / "db" / "migrations")
+    migration = migrations[6]
+    sql = apply_migrations._normalize_sql(migration.sql)
+
+    assert migration.path.name == "007_hypothesis_registry.sql"
+    assert "create table silver.hypotheses" in sql
+    assert "create table silver.hypothesis_evaluations" in sql
+    assert "unique (hypothesis_key)" in sql
+    assert "unique (hypothesis_id, backtest_run_id)" in sql
+    assert "references silver.hypotheses(id) on delete restrict" in sql
+    assert "references silver.model_runs(id) on delete restrict" in sql
+    assert "references silver.backtest_runs(id) on delete restrict" in sql
+    assert "check ( status in (" in sql
+    for status in ("proposed", "running", "rejected", "promising", "accepted"):
+        assert f"'{status}'" in sql
+    assert "'retired'" in sql
+    assert "check ( evaluation_status in (" in sql
+    for status in ("running", "rejected", "promising", "accepted", "failed"):
+        assert f"'{status}'" in sql
+    assert "check (jsonb_typeof(metadata) = 'object')" in sql
+    assert "check (jsonb_typeof(summary_metrics) = 'object')" in sql
