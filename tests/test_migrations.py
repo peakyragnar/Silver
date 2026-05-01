@@ -229,3 +229,14 @@ def test_hypothesis_registry_migration_static_expectations() -> None:
         assert f"'{status}'" in sql
     assert "check (jsonb_typeof(metadata) = 'object')" in sql
     assert "check (jsonb_typeof(summary_metrics) = 'object')" in sql
+
+
+def test_sec_companyfacts_run_kind_migration_allows_raw_ingest_runs() -> None:
+    migrations = apply_migrations.check_migrations(ROOT / "db" / "migrations")
+    migration = migrations[7]
+    sql = apply_migrations._normalize_sql(migration.sql)
+
+    assert migration.path.name == "008_add_sec_companyfacts_run_kind.sql"
+    assert "drop constraint analytics_runs_run_kind_check" in sql
+    assert "add constraint analytics_runs_run_kind_check" in sql
+    assert "'sec_companyfacts_ingest'" in sql

@@ -10,6 +10,16 @@ from silver.sources.fmp import (
     FMPTransportError,
     FMPTransportResponse,
 )
+from silver.sources.sec import (
+    SECClient,
+    SECClientError,
+    SECConfigurationError,
+    SECHTTPError,
+    SECRawResponse,
+    SECTransport,
+    SECTransportError,
+    SECTransportResponse,
+)
 
 __all__ = [
     "FMPClient",
@@ -20,4 +30,12 @@ __all__ = [
     "FMPTransport",
     "FMPTransportError",
     "FMPTransportResponse",
+    "SECClient",
+    "SECClientError",
+    "SECConfigurationError",
+    "SECHTTPError",
+    "SECRawResponse",
+    "SECTransport",
+    "SECTransportError",
+    "SECTransportResponse",
 ]

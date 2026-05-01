@@ -13,6 +13,12 @@ from silver.ingest.raw_vault import (
     content_hash,
     request_fingerprint,
 )
+from silver.ingest.sec_companyfacts import (
+    SecCompanyFactsIngestError,
+    SecCompanyFactsIngestResult,
+    SecCompanyFactsTickerResult,
+    ingest_sec_companyfacts,
+)
 
 __all__ = [
     "FmpPriceIngestError",
@@ -23,5 +29,9 @@ __all__ = [
     "TickerIngestResult",
     "content_hash",
     "ingest_fmp_prices",
+    "ingest_sec_companyfacts",
     "request_fingerprint",
+    "SecCompanyFactsIngestError",
+    "SecCompanyFactsIngestResult",
+    "SecCompanyFactsTickerResult",
 ]

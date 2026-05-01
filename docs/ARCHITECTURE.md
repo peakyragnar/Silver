@@ -223,6 +223,25 @@ still be attempted for each transport-produced response, but strict per-attempt
 row cardinality for byte-identical retry bodies requires a follow-up schema
 ticket, such as an additive attempt-event table keyed to `raw_objects.id`.
 
+## SEC Companyfacts Raw Boundary
+
+SEC companyfacts ingest is a raw-vault operation first. The source client must
+write the exact HTTP response bytes into `silver.raw_objects` before any future
+fundamental parser or feature materializer reads them.
+
+Every companyfacts request is keyed by 10-digit CIK and stored with:
+
+- `vendor`: `sec`
+- endpoint shape: `/api/xbrl/companyfacts/CIK##########.json`
+- request params containing the CIK
+- HTTP status, content type, exact response bytes, body hash, request
+  fingerprint, `fetched_at`, and metadata
+
+The ingest analytics run uses `run_kind = 'sec_companyfacts_ingest'` and records
+the `xbrl_companyfacts` available-at policy version. Raw companyfacts are not
+themselves tradable features; later normalization must derive fact-level
+`available_at` from the underlying filing acceptance time and policy version.
+
 ## LLM Boundary
 
 LLMs may extract structured text features, propose hypotheses, and explain

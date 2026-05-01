@@ -394,10 +394,41 @@ Examples:
 
 ```text
 price_normalization
+sec_companyfacts_ingest
 label_generation
 feature_generation
 falsifier_report_invocation
 ```
+
+### sec_companyfacts_ingest
+
+`sec_companyfacts_ingest` is the job that fetches SEC XBRL companyfacts JSON
+and stores the exact vendor response in the raw vault.
+
+It reads:
+
+```text
+SEC companyfacts API
+silver.universe_membership
+silver.securities.cik
+```
+
+and writes:
+
+```text
+silver.raw_objects
+```
+
+Plain English:
+
+```text
+For each company in the universe, fetch the SEC's raw companyfacts file and
+store the exact bytes before we try to normalize any fundamentals.
+```
+
+This job does not yet create fundamental features. It records the
+`xbrl_companyfacts` available-at policy version so later normalization knows
+which point-in-time rule applies to facts derived from filings.
 
 ### price_normalization
 
