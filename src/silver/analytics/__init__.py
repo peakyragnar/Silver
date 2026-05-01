@@ -10,6 +10,16 @@ from silver.analytics.falsifier_diagnostics import (
     load_falsifier_input_diagnostics,
     render_falsifier_input_diagnostics,
 )
+from silver.analytics.hypothesis_evaluation_explainer import (
+    EvaluationIdentity,
+    HypothesisEvaluationExplanation,
+    HypothesisEvaluationExplanationError,
+    HypothesisEvaluationJsonClient,
+    TickerAttribution,
+    WalkForwardWindowExplanation,
+    load_hypothesis_evaluation_explanation,
+    render_hypothesis_evaluation_explanation,
+)
 from silver.analytics.repository import (
     AnalyticsRunError,
     AnalyticsRunRecord,
@@ -43,13 +53,21 @@ __all__ = [
     "FalsifierInputDiagnostics",
     "FeatureDefinitionDiagnostic",
     "HorizonCoverage",
+    "HypothesisEvaluationExplanation",
+    "HypothesisEvaluationExplanationError",
+    "HypothesisEvaluationJsonClient",
     "JsonQueryClient",
     "ModelRunCreate",
     "ModelRunFinish",
     "ModelRunReplayMetadata",
     "ModelRunRecord",
+    "TickerAttribution",
     "TickerInputCoverage",
+    "EvaluationIdentity",
+    "WalkForwardWindowExplanation",
     "compare_backtest_replay_snapshots",
     "load_falsifier_input_diagnostics",
+    "load_hypothesis_evaluation_explanation",
     "render_falsifier_input_diagnostics",
+    "render_hypothesis_evaluation_explanation",
 ]

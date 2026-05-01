@@ -844,6 +844,39 @@ Plain English:
 We tested this idea using this setup and this result, and this was the verdict.
 ```
 
+## Hypothesis Evaluation Explainer
+
+The explainer is the operator command for understanding a stored verdict.
+
+Command:
+
+```bash
+uv run python scripts/explain_hypothesis_evaluation.py --backtest-run-id 25
+```
+
+or:
+
+```bash
+uv run python scripts/explain_hypothesis_evaluation.py --hypothesis-key short_reversal_21_0
+```
+
+It reads existing database evidence and prints:
+
+```text
+verdict
+strategy / universe / horizon
+model_run_id and backtest_run_id
+headline strategy vs baseline metrics
+walk-forward positive windows
+label-scramble result
+strongest and weakest windows
+strongest and weakest selected tickers
+regime summary
+```
+
+It does not ingest data, compute new features, rerun a falsifier, or write a new
+database result. It is a read-only explanation layer over stored evidence.
+
 ## Current Database Counts
 
 At the time this note was created, the research audit tables contained:
