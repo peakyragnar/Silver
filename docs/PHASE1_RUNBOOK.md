@@ -290,7 +290,27 @@ Recording an evaluation moves the hypothesis status to `promising`,
 `rejected`, `accepted`, or `running`; failed backtest execution does not by
 itself retire a hypothesis.
 
-## 7. Read The Report
+## 7. Summarize Research Results
+
+Generate the research cockpit after candidate evaluations are linked:
+
+```bash
+python scripts/research_results_report.py --check
+python scripts/research_results_report.py
+```
+
+The default output is:
+
+```text
+reports/research/results_v0.md
+```
+
+This report summarizes latest hypothesis verdicts, feature families, tested
+horizons, strategy-vs-baseline results, rejection reasons, untested hypotheses,
+and suggested next tests. It is a navigation layer only; durable
+`backtest_runs` and `model_runs` rows remain the authoritative evidence.
+
+## 8. Read The Falsifier Report
 
 Start with `Status`, `Data Coverage`, and `Failure Modes`. Then check
 `Headline Metrics`, `Baseline Comparison`, `Costs Assumption`, and

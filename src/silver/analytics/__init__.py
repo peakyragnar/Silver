@@ -20,6 +20,14 @@ from silver.analytics.hypothesis_evaluation_explainer import (
     load_hypothesis_evaluation_explanation,
     render_hypothesis_evaluation_explanation,
 )
+from silver.analytics.research_results import (
+    ResearchResultRow,
+    ResearchResultsError,
+    ResearchResultsJsonClient,
+    ResearchResultsReport,
+    load_research_results_report,
+    render_research_results_report,
+)
 from silver.analytics.repository import (
     AnalyticsRunError,
     AnalyticsRunRecord,
@@ -61,6 +69,10 @@ __all__ = [
     "ModelRunFinish",
     "ModelRunReplayMetadata",
     "ModelRunRecord",
+    "ResearchResultRow",
+    "ResearchResultsError",
+    "ResearchResultsJsonClient",
+    "ResearchResultsReport",
     "TickerAttribution",
     "TickerInputCoverage",
     "EvaluationIdentity",
@@ -68,6 +80,8 @@ __all__ = [
     "compare_backtest_replay_snapshots",
     "load_falsifier_input_diagnostics",
     "load_hypothesis_evaluation_explanation",
+    "load_research_results_report",
     "render_falsifier_input_diagnostics",
     "render_hypothesis_evaluation_explanation",
+    "render_research_results_report",
 ]

@@ -34,6 +34,9 @@ and humans building Silver.
 - [`../scripts/objective_run.py`](../scripts/objective_run.py): portable
   objective run controller that composes the ledger, Linear/Symphony mirror,
   VCS reconciler, repair lane, and merge steward
+- [`../scripts/research_results_report.py`](../scripts/research_results_report.py):
+  one-page markdown cockpit for latest hypothesis, feature, backtest, verdict,
+  and next-test evidence
 - [`../config/agentic_build.yaml`](../config/agentic_build.yaml): Silver project
   adapter config for the portable objective controller
 

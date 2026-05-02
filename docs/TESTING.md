@@ -42,6 +42,7 @@ python scripts/materialize_feature_candidates.py --check
 python scripts/check_falsifier_inputs.py --check
 python scripts/run_feature_candidate_pack.py --check
 python scripts/run_feature_candidate_walk_forward.py --check
+python scripts/research_results_report.py --check
 python -m pytest
 ruff check .
 ```
