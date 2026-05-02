@@ -78,3 +78,69 @@ candidates:
       The low-volatility effect can appear when investors overpay for high-beta
       or lottery-like stocks.
     notes: Trailing 63-session annualized sample standard deviation of returns.
+
+  - hypothesis_key: revenue_growth_yoy
+    name: Revenue Growth YoY
+    source_feature: revenue_growth_yoy
+    materializer: revenue_growth_yoy
+    selection_direction: high
+    thesis: >-
+      Securities with stronger latest visible quarterly revenue growth versus
+      the same fiscal quarter one year earlier may outperform over the next
+      quarter.
+    mechanism: >-
+      Sustained top-line acceleration can indicate stronger demand, pricing
+      power, or share gains before price fully reflects the business trend.
+    notes: Latest visible quarterly revenue divided by same-quarter prior-year revenue minus one.
+
+  - hypothesis_key: gross_margin
+    name: Gross Margin
+    source_feature: gross_margin
+    materializer: gross_margin
+    selection_direction: high
+    thesis: >-
+      Securities with higher latest visible quarterly gross margin may
+      outperform over the next quarter.
+    mechanism: >-
+      Strong gross margins can indicate pricing power, cost discipline, or mix
+      improvement that supports future earnings quality.
+    notes: Latest visible quarterly gross profit divided by revenue.
+
+  - hypothesis_key: operating_margin
+    name: Operating Margin
+    source_feature: operating_margin
+    materializer: operating_margin
+    selection_direction: high
+    thesis: >-
+      Securities with higher latest visible quarterly operating margin may
+      outperform over the next quarter.
+    mechanism: >-
+      Operating margin can capture operating leverage and expense discipline
+      that may persist beyond the report date.
+    notes: Latest visible quarterly operating income divided by revenue.
+
+  - hypothesis_key: net_margin
+    name: Net Margin
+    source_feature: net_margin
+    materializer: net_margin
+    selection_direction: high
+    thesis: >-
+      Securities with higher latest visible quarterly net margin may outperform
+      over the next quarter.
+    mechanism: >-
+      Net margin captures bottom-line profitability after interest, tax, and
+      other below-operating items that may matter to equity returns.
+    notes: Latest visible quarterly net income divided by revenue.
+
+  - hypothesis_key: diluted_shares_change_yoy
+    name: Diluted Shares Change YoY
+    source_feature: diluted_shares_change_yoy
+    materializer: diluted_shares_change_yoy
+    selection_direction: low
+    thesis: >-
+      Securities with lower diluted share-count growth versus the same fiscal
+      quarter one year earlier may outperform over the next quarter.
+    mechanism: >-
+      Lower share growth, or outright shrinkage, can indicate lower dilution or
+      active capital return that improves per-share economics.
+    notes: Latest visible diluted weighted average shares divided by same-quarter prior-year shares minus one.

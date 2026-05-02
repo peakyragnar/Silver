@@ -12,6 +12,7 @@ from silver.features import (
     FeatureCandidate,
     FeatureStoreError,
     FeatureValueWrite,
+    FundamentalMetricObservation,
     feature_candidate_by_key,
     feature_candidate_keys,
     feature_definition_hash,
@@ -60,6 +61,11 @@ def test_feature_candidate_pack_v1_keys_are_stable() -> None:
         "momentum_3_0",
         "short_reversal_21_0",
         "low_realized_volatility_63",
+        "revenue_growth_yoy",
+        "gross_margin",
+        "operating_margin",
+        "net_margin",
+        "diluted_shares_change_yoy",
     )
 
 
@@ -201,6 +207,61 @@ def test_materialize_short_reversal_candidate_writes_price_return_value() -> Non
     assert stored.source_metadata["window"]["skip_recent_sessions"] == 0
 
 
+def test_materialize_revenue_growth_yoy_candidate_writes_fundamental_value() -> None:
+    candidate = feature_candidate_by_key("revenue_growth_yoy")
+    calendar_rows, sessions = _calendar_rows(date(2025, 1, 2), session_count=2)
+    repository = FakeCandidateRepository(
+        candidate=candidate,
+        calendar_rows=calendar_rows,
+        fundamentals={
+            SECURITY_ID: [
+                _fundamental_metric(
+                    1,
+                    fiscal_year=2024,
+                    fiscal_period="Q1",
+                    period_end_date=date(2024, 3, 31),
+                    metric_name="revenue",
+                    metric_value="100.00",
+                    available_at=_utc("2024-05-01T20:00:00+00:00"),
+                ),
+                _fundamental_metric(
+                    2,
+                    fiscal_year=2025,
+                    fiscal_period="Q1",
+                    period_end_date=date(2025, 3, 31),
+                    metric_name="revenue",
+                    metric_value="120.00",
+                    available_at=_utc("2025-01-03T20:00:00+00:00"),
+                ),
+            ]
+        },
+    )
+
+    summary = materialize_feature_candidate(
+        repository,
+        candidate,
+        universe_name="falsifier_seed",
+        start_date=None,
+        end_date=None,
+        computed_by_run_id=91,
+    )
+
+    assert summary.values_written == 1
+    assert summary.skipped_by_reason == {"missing_prior_year_metric": 1}
+    [stored] = repository.feature_values.values()
+    assert stored.value == 0.2
+    assert stored.asof_date == sessions[-1]
+    assert stored.available_at == _utc("2025-01-03T20:00:00+00:00")
+    assert stored.available_at_policy_id == 7
+    assert stored.source_metadata["source_table"] == "silver.fundamental_values"
+    assert stored.source_metadata["fundamental_policy"] == {
+        "name": "sec_10q_filing",
+        "version": 1,
+    }
+    assert stored.source_metadata["window"]["current_fiscal_period"] == "Q1"
+    assert stored.source_metadata["window"]["source_value_ids"] == [1, 2]
+
+
 def test_candidate_pack_builds_low_direction_falsifier_command() -> None:
     candidate = feature_candidate_by_key("low_realized_volatility_63")
 
@@ -338,6 +399,33 @@ def _price_volume(
     )
 
 
+def _fundamental_metric(
+    metric_id: int,
+    *,
+    fiscal_year: int,
+    fiscal_period: str,
+    period_end_date: date,
+    metric_name: str,
+    metric_value: str,
+    available_at: datetime,
+) -> FundamentalMetricObservation:
+    return FundamentalMetricObservation(
+        id=metric_id,
+        security_id=SECURITY_ID,
+        period_end_date=period_end_date,
+        fiscal_year=fiscal_year,
+        fiscal_period=fiscal_period,
+        metric_name=metric_name,
+        metric_value=Decimal(metric_value),
+        available_at=available_at,
+        available_at_policy_id=7,
+    )
+
+
+def _utc(value: str) -> datetime:
+    return datetime.fromisoformat(value).astimezone(timezone.utc)
+
+
 class FakeCandidateRepository:
     def __init__(
         self,
@@ -346,6 +434,7 @@ class FakeCandidateRepository:
         calendar_rows: tuple[TradingCalendarRow, ...],
         prices: dict[int, list[AdjustedDailyPriceObservation]] | None = None,
         price_volumes: dict[int, list[AdjustedPriceVolumeObservation]] | None = None,
+        fundamentals: dict[int, list[FundamentalMetricObservation]] | None = None,
     ) -> None:
         self.definition = FeatureDefinitionRecord(
             id=502,
@@ -367,6 +456,15 @@ class FakeCandidateRepository:
                 "timezone": "America/New_York",
             },
         )
+        self.fundamental_policy = AvailableAtPolicyRecord(
+            id=7,
+            name="sec_10q_filing",
+            version=1,
+            rule={
+                "type": "next_trading_session_time_after_timestamp",
+                "base": "accepted_at",
+            },
+        )
         self.memberships = (
             UniverseMembershipRecord(
                 security_id=SECURITY_ID,
@@ -378,6 +476,7 @@ class FakeCandidateRepository:
         self.calendar_rows = calendar_rows
         self.prices = prices or {}
         self.price_volumes = price_volumes or {}
+        self.fundamentals = fundamentals or {}
         self.feature_values: dict[tuple[int, date, int], FeatureValueWrite] = {}
 
     def ensure_feature_definition(
@@ -394,6 +493,8 @@ class FakeCandidateRepository:
         name: str,
         version: int,
     ) -> AvailableAtPolicyRecord:
+        if name == "sec_10q_filing":
+            return self.fundamental_policy
         return self.policy
 
     def load_universe_memberships(
@@ -440,6 +541,27 @@ class FakeCandidateRepository:
             for price in self.price_volumes.get(security_id, []):
                 if end_date is None or price.price_date <= end_date:
                     rows.append((security_id, price))
+        return tuple(rows)
+
+    def load_quarterly_income_statement_metrics(
+        self,
+        *,
+        security_ids: list[int] | tuple[int, ...],
+        metric_names: list[str] | tuple[str, ...],
+        available_at_policy_id: int,
+        available_at_cutoff: datetime,
+    ) -> tuple[FundamentalMetricObservation, ...]:
+        selected_metrics = set(metric_names)
+        rows: list[FundamentalMetricObservation] = []
+        for security_id in security_ids:
+            for row in self.fundamentals.get(security_id, []):
+                if row.metric_name not in selected_metrics:
+                    continue
+                if row.available_at_policy_id != available_at_policy_id:
+                    continue
+                if row.available_at > available_at_cutoff:
+                    continue
+                rows.append(row)
         return tuple(rows)
 
     def write_feature_values(self, values: Any) -> object:

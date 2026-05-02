@@ -118,7 +118,7 @@ The first candidate fundamental features are:
 revenue_growth_yoy
 gross_margin
 operating_margin
-free_cash_flow_margin
+net_margin
 diluted_shares_change_yoy
 ```
 
@@ -134,8 +134,8 @@ gross_margin =
 operating_margin =
   operating_income / revenue
 
-free_cash_flow_margin =
-  free_cash_flow / revenue
+net_margin =
+  net_income / revenue
 
 diluted_shares_change_yoy =
   diluted_weighted_average_shares(current comparable period)
@@ -143,7 +143,12 @@ diluted_shares_change_yoy =
 ```
 
 For quarterly rows, compare to the same fiscal quarter in the prior fiscal year.
-For annual rows, compare to the prior fiscal year.
+If annual features are added later, compare to the prior fiscal year.
+
+The first implemented feature pack uses quarterly income-statement rows only.
+Each feature is materialized daily by carrying forward the latest quarterly
+period whose `available_at` timestamp is visible at that trading day's snapshot
+time. Cash-flow features remain deferred until we intentionally add them.
 
 ## Point-In-Time Rules
 

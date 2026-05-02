@@ -30,6 +30,17 @@ from silver.features import (  # noqa: E402
 from silver.reference.seed_data import FALSIFIER_UNIVERSE_NAME  # noqa: E402
 
 
+QUARTERLY_FILING_POLICY_NAME = "sec_10q_filing"
+QUARTERLY_FILING_POLICY_VERSION = 1
+FUNDAMENTAL_MATERIALIZERS = {
+    "revenue_growth_yoy",
+    "gross_margin",
+    "operating_margin",
+    "net_margin",
+    "diluted_shares_change_yoy",
+}
+
+
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -153,13 +164,12 @@ def _materialize_one_candidate(
         run_id = repository.create_feature_generation_run(
             code_git_sha=_code_git_sha(),
             feature_set_hash=definition_hash,
-            available_at_policy_versions={
-                DAILY_PRICE_POLICY_NAME: DAILY_PRICE_POLICY_VERSION
-            },
+            available_at_policy_versions=_available_at_policy_versions(candidate),
             parameters={
                 "candidate_key": candidate.hypothesis_key,
                 "feature": candidate.signal_name,
                 "feature_version": candidate.definition.version,
+                "materializer": candidate.materializer,
                 "selection_direction": candidate.selection_direction,
                 "universe": universe,
                 "start_date": start_date.isoformat() if start_date else None,
@@ -200,6 +210,12 @@ def _candidate_check_line(candidate: FeatureCandidate) -> str:
         f"selection_direction={candidate.selection_direction}; "
         f"definition_hash={feature_definition_hash(candidate.definition)}"
     )
+
+
+def _available_at_policy_versions(candidate: FeatureCandidate) -> dict[str, int]:
+    if candidate.materializer in FUNDAMENTAL_MATERIALIZERS:
+        return {QUARTERLY_FILING_POLICY_NAME: QUARTERLY_FILING_POLICY_VERSION}
+    return {DAILY_PRICE_POLICY_NAME: DAILY_PRICE_POLICY_VERSION}
 
 
 def _date_arg(raw: str) -> date:

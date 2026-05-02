@@ -193,6 +193,11 @@ return_63_0
 return_21_0
 avg_dollar_volume_63
 realized_volatility_63
+revenue_growth_yoy
+gross_margin
+operating_margin
+net_margin
+diluted_shares_change_yoy
 ```
 
 Features look backward or at current available data. Labels look forward.
@@ -202,6 +207,10 @@ The core test is:
 ```text
 past/current feature -> future label
 ```
+
+The fundamental features use quarterly FMP income-statement rows. They are
+daily point-in-time features: for each trading date, Silver carries forward the
+latest quarterly statement that was visible by that day's snapshot time.
 
 ## momentum_12_1
 

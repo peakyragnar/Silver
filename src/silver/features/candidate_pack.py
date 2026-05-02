@@ -6,15 +6,30 @@ from collections import Counter, defaultdict
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, fields, is_dataclass
 from datetime import date, datetime, timezone
+from decimal import Decimal
 from pathlib import Path
 from typing import Literal, Protocol, cast
 
 import yaml
 
+from silver.fundamentals.repository import (
+    DEFAULT_FILING_POLICY_VERSION,
+    QUARTERLY_FILING_POLICY_NAME,
+)
 from silver.features.dollar_volume import (
     AVG_DOLLAR_VOLUME_63_DEFINITION,
     AdjustedPriceVolumeObservation,
     compute_avg_dollar_volume_63,
+)
+from silver.features.income_statement import (
+    DILUTED_SHARES_CHANGE_YOY_DEFINITION,
+    GROSS_MARGIN_DEFINITION,
+    INCOME_STATEMENT_METRICS,
+    NET_MARGIN_DEFINITION,
+    OPERATING_MARGIN_DEFINITION,
+    REVENUE_GROWTH_YOY_DEFINITION,
+    FundamentalMetricObservation,
+    compute_quarterly_income_feature,
 )
 from silver.features.momentum_12_1 import (
     DAILY_PRICE_POLICY_NAME,
@@ -64,7 +79,26 @@ CandidateMaterializer = Literal[
     "return_21_0",
     "avg_dollar_volume_63",
     "realized_volatility_63",
+    "revenue_growth_yoy",
+    "gross_margin",
+    "operating_margin",
+    "net_margin",
+    "diluted_shares_change_yoy",
 ]
+FundamentalMaterializer = Literal[
+    "revenue_growth_yoy",
+    "gross_margin",
+    "operating_margin",
+    "net_margin",
+    "diluted_shares_change_yoy",
+]
+FUNDAMENTAL_MATERIALIZERS: tuple[FundamentalMaterializer, ...] = (
+    "revenue_growth_yoy",
+    "gross_margin",
+    "operating_margin",
+    "net_margin",
+    "diluted_shares_change_yoy",
+)
 
 
 class CandidateFeatureRepository(Protocol):
@@ -118,6 +152,16 @@ class CandidateFeatureRepository(Protocol):
     ) -> tuple[tuple[int, AdjustedPriceVolumeObservation], ...]:
         ...
 
+    def load_quarterly_income_statement_metrics(
+        self,
+        *,
+        security_ids: Sequence[int],
+        metric_names: Sequence[str],
+        available_at_policy_id: int,
+        available_at_cutoff: datetime,
+    ) -> tuple[FundamentalMetricObservation, ...]:
+        ...
+
     def write_feature_values(
         self,
         values: Sequence[FeatureValueWrite],
@@ -149,6 +193,11 @@ _MATERIALIZER_FEATURE_DEFINITIONS: dict[
     "return_21_0": RETURN_21_0_DEFINITION,
     "avg_dollar_volume_63": AVG_DOLLAR_VOLUME_63_DEFINITION,
     "realized_volatility_63": REALIZED_VOLATILITY_63_DEFINITION,
+    "revenue_growth_yoy": REVENUE_GROWTH_YOY_DEFINITION,
+    "gross_margin": GROSS_MARGIN_DEFINITION,
+    "operating_margin": OPERATING_MARGIN_DEFINITION,
+    "net_margin": NET_MARGIN_DEFINITION,
+    "diluted_shares_change_yoy": DILUTED_SHARES_CHANGE_YOY_DEFINITION,
 }
 
 
@@ -271,10 +320,6 @@ def materialize_feature_candidate(
         candidate.definition,
         notes=candidate.notes,
     )
-    policy = repository.load_available_at_policy(
-        name=DAILY_PRICE_POLICY_NAME,
-        version=DAILY_PRICE_POLICY_VERSION,
-    )
     memberships = repository.load_universe_memberships(
         universe_name=universe_name,
         start_date=start_date,
@@ -294,6 +339,10 @@ def materialize_feature_candidate(
     )
 
     if candidate.materializer == "avg_dollar_volume_63":
+        policy = repository.load_available_at_policy(
+            name=DAILY_PRICE_POLICY_NAME,
+            version=DAILY_PRICE_POLICY_VERSION,
+        )
         writes, skipped, eligible = _materialize_dollar_volume(
             repository,
             candidate=candidate,
@@ -307,7 +356,28 @@ def materialize_feature_candidate(
             end_date=end_date,
             computed_by_run_id=computed_by_run_id,
         )
+    elif candidate.materializer in FUNDAMENTAL_MATERIALIZERS:
+        policy = repository.load_available_at_policy(
+            name=QUARTERLY_FILING_POLICY_NAME,
+            version=DEFAULT_FILING_POLICY_VERSION,
+        )
+        writes, skipped, eligible = _materialize_quarterly_income_candidate(
+            repository,
+            candidate=candidate,
+            definition=definition,
+            policy=policy,
+            memberships=memberships,
+            security_ids=security_ids,
+            candidate_dates=candidate_dates,
+            universe_name=universe_name,
+            computed_by_run_id=computed_by_run_id,
+            available_at_cutoff=cutoff,
+        )
     else:
+        policy = repository.load_available_at_policy(
+            name=DAILY_PRICE_POLICY_NAME,
+            version=DAILY_PRICE_POLICY_VERSION,
+        )
         writes, skipped, eligible = _materialize_price_only_candidate(
             repository,
             candidate=candidate,
@@ -529,6 +599,58 @@ def _materialize_dollar_volume(
     return writes, skipped, eligible_security_dates
 
 
+def _materialize_quarterly_income_candidate(
+    repository: CandidateFeatureRepository,
+    *,
+    candidate: FeatureCandidate,
+    definition: FeatureDefinitionRecord,
+    policy: AvailableAtPolicyRecord,
+    memberships: Sequence[UniverseMembershipRecord],
+    security_ids: Sequence[int],
+    candidate_dates: Sequence[date],
+    universe_name: str,
+    computed_by_run_id: int,
+    available_at_cutoff: datetime,
+) -> tuple[list[FeatureValueWrite], Counter[str], int]:
+    rows = repository.load_quarterly_income_statement_metrics(
+        security_ids=security_ids,
+        metric_names=INCOME_STATEMENT_METRICS,
+        available_at_policy_id=policy.id,
+        available_at_cutoff=available_at_cutoff,
+    )
+    rows_by_security = _fundamental_metrics_by_security(rows)
+    writes: list[FeatureValueWrite] = []
+    skipped: Counter[str] = Counter()
+    eligible_security_dates = 0
+
+    for asof_date in candidate_dates:
+        asof = daily_price_available_at(asof_date).astimezone(timezone.utc)
+        for membership in memberships:
+            if not membership.is_active_on(asof_date):
+                continue
+            eligible_security_dates += 1
+            result = compute_quarterly_income_feature(
+                security_id=membership.security_id,
+                asof=asof,
+                observations=rows_by_security.get(membership.security_id, ()),
+                definition=candidate.definition,
+            )
+            if result.status != "ok" or result.value is None:
+                skipped[result.status] += 1
+                continue
+            writes.append(
+                _fundamental_feature_value_write(
+                    result=result,
+                    definition=definition,
+                    policy=policy,
+                    candidate=candidate,
+                    universe_name=universe_name,
+                    computed_by_run_id=computed_by_run_id,
+                )
+            )
+    return writes, skipped, eligible_security_dates
+
+
 def _feature_value_write(
     *,
     result: object,
@@ -553,6 +675,36 @@ def _feature_value_write(
             "universe_name": universe_name,
             "available_at": getattr(result, "available_at").isoformat(),
             "daily_price_policy": {"name": policy.name, "version": policy.version},
+            "window": _metadata_value(getattr(result, "window")),
+        },
+    )
+
+
+def _fundamental_feature_value_write(
+    *,
+    result: object,
+    definition: FeatureDefinitionRecord,
+    policy: AvailableAtPolicyRecord,
+    candidate: FeatureCandidate,
+    universe_name: str,
+    computed_by_run_id: int,
+) -> FeatureValueWrite:
+    return FeatureValueWrite(
+        security_id=getattr(result, "security_id"),
+        asof_date=getattr(result, "asof_date"),
+        feature_definition_id=definition.id,
+        value=float(getattr(result, "value")),
+        available_at=getattr(result, "available_at"),
+        available_at_policy_id=policy.id,
+        computed_by_run_id=computed_by_run_id,
+        source_metadata={
+            "source": f"silver.features.{candidate.materializer}",
+            "source_table": "silver.fundamental_values",
+            "candidate_key": candidate.hypothesis_key,
+            "selection_direction": candidate.selection_direction,
+            "universe_name": universe_name,
+            "available_at": getattr(result, "available_at").isoformat(),
+            "fundamental_policy": {"name": policy.name, "version": policy.version},
             "window": _metadata_value(getattr(result, "window")),
         },
     )
@@ -696,9 +848,33 @@ def _price_volume_lookup_by_security(
     return dict(grouped)
 
 
+def _fundamental_metrics_by_security(
+    rows: Sequence[FundamentalMetricObservation],
+) -> dict[int, tuple[FundamentalMetricObservation, ...]]:
+    grouped: defaultdict[int, list[FundamentalMetricObservation]] = defaultdict(list)
+    for row in rows:
+        grouped[row.security_id].append(row)
+    return {
+        security_id: tuple(
+            sorted(
+                values,
+                key=lambda item: (
+                    item.period_end_date,
+                    item.fiscal_year,
+                    item.fiscal_period,
+                    item.metric_name,
+                ),
+            )
+        )
+        for security_id, values in grouped.items()
+    }
+
+
 def _metadata_value(value: object) -> object:
     if isinstance(value, (date, datetime)):
         return value.isoformat()
+    if isinstance(value, Decimal):
+        return str(value)
     if is_dataclass(value):
         return {
             field.name: _metadata_value(getattr(value, field.name))

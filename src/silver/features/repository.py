@@ -17,6 +17,7 @@ from silver.features.momentum_12_1 import (
     NumericFeatureDefinition,
 )
 from silver.features.dollar_volume import AdjustedPriceVolumeObservation
+from silver.features.income_statement import FundamentalMetricObservation
 from silver.time.trading_calendar import TradingCalendarRow
 
 
@@ -244,6 +245,46 @@ class FeatureStoreRepository:
             )
             rows = cursor.fetchall()
         return tuple(_adjusted_price_volume_row(row) for row in rows)
+
+    def load_quarterly_income_statement_metrics(
+        self,
+        *,
+        security_ids: Sequence[int],
+        metric_names: Sequence[str],
+        available_at_policy_id: int,
+        available_at_cutoff: datetime,
+    ) -> tuple[FundamentalMetricObservation, ...]:
+        normalized_security_ids = tuple(
+            sorted(
+                {
+                    _positive_int(security_id, "security_id")
+                    for security_id in security_ids
+                }
+            )
+        )
+        normalized_metric_names = tuple(
+            sorted({_non_empty_str(metric_name, "metric_name") for metric_name in metric_names})
+        )
+        normalized_policy_id = _positive_int(
+            available_at_policy_id,
+            "available_at_policy_id",
+        )
+        _require_aware(available_at_cutoff, "available_at_cutoff")
+        if not normalized_security_ids or not normalized_metric_names:
+            return ()
+
+        with _cursor(self._connection) as cursor:
+            cursor.execute(
+                _SELECT_QUARTERLY_INCOME_FUNDAMENTALS_SQL,
+                {
+                    "security_ids": list(normalized_security_ids),
+                    "metric_names": list(normalized_metric_names),
+                    "available_at_policy_id": normalized_policy_id,
+                    "available_at_cutoff": available_at_cutoff,
+                },
+            )
+            rows = cursor.fetchall()
+        return tuple(_fundamental_metric_row(row) for row in rows)
 
     def write_feature_values(
         self,
@@ -501,6 +542,45 @@ def _adjusted_price_volume_row(
     )
 
 
+def _fundamental_metric_row(row: object) -> FundamentalMetricObservation:
+    return FundamentalMetricObservation(
+        id=_row_int(row, "id", 0, "fundamental_values.id"),
+        security_id=_row_int(row, "security_id", 1, "fundamental_values.security_id"),
+        period_end_date=_row_date(
+            row,
+            "period_end_date",
+            2,
+            "fundamental_values.period_end_date",
+        ),
+        fiscal_year=_row_int(row, "fiscal_year", 3, "fundamental_values.fiscal_year"),
+        fiscal_period=_row_str(
+            row,
+            "fiscal_period",
+            4,
+            "fundamental_values.fiscal_period",
+        ),
+        metric_name=_row_str(row, "metric_name", 5, "fundamental_values.metric_name"),
+        metric_value=_row_finite_decimal(
+            row,
+            "metric_value",
+            6,
+            "fundamental_values.metric_value",
+        ),
+        available_at=_row_datetime(
+            row,
+            "available_at",
+            7,
+            "fundamental_values.available_at",
+        ),
+        available_at_policy_id=_row_int(
+            row,
+            "available_at_policy_id",
+            8,
+            "fundamental_values.available_at_policy_id",
+        ),
+    )
+
+
 def _json_dumps(value: Mapping[str, Any]) -> str:
     _json_object(value, "json value")
     return json.dumps(
@@ -660,6 +740,19 @@ def _row_decimal(row: object, key: str, index: int, name: str) -> Decimal:
     return result
 
 
+def _row_finite_decimal(row: object, key: str, index: int, name: str) -> Decimal:
+    value = _row_value(row, key, index)
+    if isinstance(value, Decimal):
+        result = value
+    elif isinstance(value, (str, int, float)):
+        result = Decimal(str(value))
+    else:
+        raise FeatureStoreError(f"{name} returned by database must be numeric")
+    if not result.is_finite():
+        raise FeatureStoreError(f"{name} returned by database must be finite")
+    return result
+
+
 def _optional_row_decimal(
     row: object,
     key: str,
@@ -784,6 +877,34 @@ WHERE run.status = 'succeeded'
   AND prices.available_at_policy_id = %(available_at_policy_id)s
   AND (%(end_date)s::date IS NULL OR prices.date <= %(end_date)s::date)
 ORDER BY prices.security_id, prices.date;
+""".strip()
+
+_SELECT_QUARTERLY_INCOME_FUNDAMENTALS_SQL = """
+SELECT
+    fundamentals.id,
+    fundamentals.security_id,
+    fundamentals.period_end_date,
+    fundamentals.fiscal_year,
+    fundamentals.fiscal_period,
+    fundamentals.metric_name,
+    fundamentals.metric_value,
+    fundamentals.available_at,
+    fundamentals.available_at_policy_id
+FROM silver.fundamental_values AS fundamentals
+JOIN silver.analytics_runs AS run
+  ON run.id = fundamentals.normalized_by_run_id
+WHERE run.status = 'succeeded'
+  AND fundamentals.security_id = ANY(%(security_ids)s)
+  AND fundamentals.period_type = 'quarterly'
+  AND fundamentals.statement_type = 'income_statement'
+  AND fundamentals.source_system = 'fmp'
+  AND fundamentals.metric_name = ANY(%(metric_names)s)
+  AND fundamentals.available_at_policy_id = %(available_at_policy_id)s
+  AND fundamentals.available_at <= %(available_at_cutoff)s
+ORDER BY
+    fundamentals.security_id,
+    fundamentals.period_end_date,
+    fundamentals.metric_name;
 """.strip()
 
 _UPSERT_FEATURE_VALUE_SQL = """
