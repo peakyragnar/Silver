@@ -78,6 +78,92 @@ def test_companyfacts_builds_stable_request_and_captures_raw_response() -> None:
     )
 
 
+def test_submissions_request_captures_raw_response() -> None:
+    payload = b'{"filings":{"recent":{}}}\n'
+    transport = FakeTransport(
+        [
+            SECTransportResponse(
+                status_code=200,
+                body=payload,
+                headers={"Content-Type": "application/json"},
+            )
+        ]
+    )
+    connection = FakeConnection()
+    client = SECClient(
+        user_agent="Silver Test michael@example.com",
+        raw_vault=RawVault(connection),
+        transport=transport,
+    )
+
+    result = client.fetch_submissions("320193")
+
+    assert transport.calls == [
+        (
+            "https://data.sec.gov/submissions/CIK0000320193.json",
+            {
+                "Accept": "application/json",
+                "User-Agent": "Silver Test michael@example.com",
+            },
+            30.0,
+        )
+    ]
+    assert result.endpoint == "/submissions/CIK0000320193.json"
+    assert result.body == payload
+    [row] = connection.rows
+    assert row["vendor"] == "sec"
+    assert row["endpoint"] == "/submissions/CIK0000320193.json"
+    assert row["metadata"]["audit_contract"] == "sec-submissions-response-audit-v1"
+
+
+def test_archive_document_request_captures_raw_response() -> None:
+    payload = b"<html>Apple reports second quarter results</html>"
+    transport = FakeTransport(
+        [
+            SECTransportResponse(
+                status_code=200,
+                body=payload,
+                headers={"Content-Type": "text/html"},
+            )
+        ]
+    )
+    connection = FakeConnection()
+    client = SECClient(
+        user_agent="Silver Test michael@example.com",
+        raw_vault=RawVault(connection),
+        transport=transport,
+    )
+
+    result = client.fetch_archive_document(
+        cik="0000320193",
+        accession_number="0000320193-26-000011",
+        document_name="a8-kex991q2202603282026.htm",
+    )
+
+    assert transport.calls == [
+        (
+            "https://www.sec.gov/Archives/edgar/data/320193/"
+            "000032019326000011/a8-kex991q2202603282026.htm",
+            {
+                "Accept": (
+                    "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+                ),
+                "User-Agent": "Silver Test michael@example.com",
+            },
+            30.0,
+        )
+    ]
+    assert result.endpoint == (
+        "/Archives/edgar/data/320193/000032019326000011/"
+        "a8-kex991q2202603282026.htm"
+    )
+    [row] = connection.rows
+    assert row["content_type"] == "text/html"
+    assert row["metadata"]["audit_contract"] == (
+        "sec-archive-document-response-audit-v1"
+    )
+
+
 def test_missing_user_agent_raises_clear_configuration_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

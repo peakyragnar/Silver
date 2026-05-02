@@ -9,6 +9,8 @@ and humans building Silver.
 - [`ARCHITECTURE.md`](ARCHITECTURE.md): repository structure and layer rules
 - [`FUNDAMENTALS_V0.md`](FUNDAMENTALS_V0.md): first FMP normalized fundamentals
   scope, selected metrics, diluted-share rule, and SEC audit relationship
+- [`EARNINGS_RELEASE_EVENTS_V0.md`](EARNINGS_RELEASE_EVENTS_V0.md): SEC 8-K
+  Item 2.02 release-event clock and linking to income-statement fundamentals
 - [`AI_NATIVE_SILVER.md`](AI_NATIVE_SILVER.md): conceptual model for Silver as
   an AI-native investment learning environment
 - [`PIT_DISCIPLINE.md`](PIT_DISCIPLINE.md): time, `available_at`, and lookahead

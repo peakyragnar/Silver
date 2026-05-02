@@ -25,6 +25,13 @@ from silver.ingest.sec_companyfacts import (
     SecCompanyFactsTickerResult,
     ingest_sec_companyfacts,
 )
+from silver.ingest.sec_earnings_releases import (
+    SecEarningsReleaseEventResult,
+    SecEarningsReleaseIngestError,
+    SecEarningsReleaseIngestResult,
+    SecEarningsReleaseTickerResult,
+    ingest_sec_earnings_releases,
+)
 
 __all__ = [
     "FmpPriceIngestError",
@@ -44,4 +51,9 @@ __all__ = [
     "SecCompanyFactsIngestError",
     "SecCompanyFactsIngestResult",
     "SecCompanyFactsTickerResult",
+    "SecEarningsReleaseEventResult",
+    "SecEarningsReleaseIngestError",
+    "SecEarningsReleaseIngestResult",
+    "SecEarningsReleaseTickerResult",
+    "ingest_sec_earnings_releases",
 ]

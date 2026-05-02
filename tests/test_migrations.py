@@ -267,3 +267,36 @@ def test_fmp_fundamental_values_migration_static_expectations() -> None:
         "unique ( security_id, period_end_date, period_type, statement_type, "
         "metric_name, source_system )"
     ) in sql
+
+
+def test_sec_earnings_release_events_migration_static_expectations() -> None:
+    migrations = apply_migrations.check_migrations(ROOT / "db" / "migrations")
+    migration = migrations[9]
+    sql = apply_migrations._normalize_sql(migration.sql)
+    body = apply_migrations._table_body(migration.sql, "earnings_release_events")
+    normalized_body = " ".join(body.lower().split())
+
+    assert migration.path.name == "010_sec_earnings_release_events.sql"
+    assert "'sec_earnings_release_ingest'" in sql
+    assert "create table silver.earnings_release_events" in sql
+    assert "create view silver.earnings_release_fundamental_values" in sql
+    assert "references silver.raw_objects(id)" in normalized_body
+    assert "references silver.available_at_policies(id)" in normalized_body
+    assert "references silver.analytics_runs(id)" in normalized_body
+    assert "release_available_at timestamptz not null" in normalized_body
+    assert "check (item_codes like '%2.02%')" in normalized_body
+    assert "unique (security_id, accession_number)" in normalized_body
+
+
+def test_earnings_release_timing_migration_static_expectations() -> None:
+    migrations = apply_migrations.check_migrations(ROOT / "db" / "migrations")
+    migration = migrations[10]
+    sql = apply_migrations._normalize_sql(migration.sql)
+
+    assert migration.path.name == "011_add_earnings_release_timing.sql"
+    assert "alter table silver.earnings_release_events add column release_timing" in sql
+    assert "america/new_york" in sql
+    assert "drop view silver.earnings_release_fundamental_values" in sql
+    assert "create view silver.earnings_release_fundamental_values" in sql
+    for timing in ("bmo", "rth", "amc", "non_trading_day"):
+        assert f"'{timing}'" in sql

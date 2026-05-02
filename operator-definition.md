@@ -396,6 +396,7 @@ Examples:
 price_normalization
 sec_companyfacts_ingest
 fmp_fundamentals_normalization
+sec_earnings_release_ingest
 label_generation
 feature_generation
 falsifier_report_invocation
@@ -475,6 +476,58 @@ diluted_weighted_average_shares
 
 Diluted weighted average shares are required. The job does not silently use
 basic shares when diluted shares are missing.
+
+### sec_earnings_release_ingest
+
+`sec_earnings_release_ingest` is the job that turns selected SEC 8-K Item 2.02
+filings into earnings release events.
+
+It reads:
+
+```text
+SEC submissions index
+SEC accession archive index
+SEC EX-99.1 earnings exhibit
+silver.universe_membership
+silver.available_at_policies
+```
+
+and writes:
+
+```text
+silver.raw_objects
+silver.earnings_release_events
+```
+
+Plain English:
+
+```text
+Find 8-K Item 2.02 filings, fetch only the likely earnings exhibit, parse the
+fiscal period it describes, and store the release clock that can be linked to
+normalized income-statement fundamentals.
+```
+
+The job preserves the exact SEC `accepted_at` timestamp and also stores:
+
+```text
+release_timing = bmo | rth | amc | non_trading_day
+```
+
+This matters because a before-open release and an after-close release belong to
+different tradable windows even when they share the same filing date.
+
+The connection to fundamentals is:
+
+```text
+security_id
+fiscal_year
+fiscal_period
+period_end_date
+```
+
+The helper view `silver.earnings_release_fundamental_values` links events to
+income-statement fundamental values. Cash-flow values should stay on the filing
+clock unless the release text proves they were disclosed.
 
 ### price_normalization
 

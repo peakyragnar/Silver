@@ -1,8 +1,9 @@
-"""SEC EDGAR client that captures companyfacts responses before parsing."""
+"""SEC EDGAR client that captures source responses before parsing."""
 
 from __future__ import annotations
 
 import os
+import re
 import time
 import urllib.error
 import urllib.parse
@@ -17,7 +18,11 @@ from silver.ingest.raw_vault import RawVaultWriteResult
 
 SEC_SOURCE = "sec"
 SEC_COMPANYFACTS_AUDIT_CONTRACT = "sec-companyfacts-response-audit-v1"
+SEC_SUBMISSIONS_AUDIT_CONTRACT = "sec-submissions-response-audit-v1"
+SEC_ARCHIVE_INDEX_AUDIT_CONTRACT = "sec-archive-index-response-audit-v1"
+SEC_ARCHIVE_DOCUMENT_AUDIT_CONTRACT = "sec-archive-document-response-audit-v1"
 DEFAULT_BASE_URL = "https://data.sec.gov"
+DEFAULT_ARCHIVE_BASE_URL = "https://www.sec.gov"
 DEFAULT_TIMEOUT_SECONDS = 30.0
 DEFAULT_MAX_RETRIES = 2
 DEFAULT_BACKOFF_SECONDS = 0.5
@@ -90,6 +95,7 @@ class _SECRequest:
     endpoint: str
     request_url: str
     vault_params: dict[str, str]
+    accept: str = "application/json"
 
 
 class SECClient:
@@ -101,6 +107,7 @@ class SECClient:
         raw_vault: Any,
         user_agent: str | None = None,
         base_url: str = DEFAULT_BASE_URL,
+        archive_base_url: str = DEFAULT_ARCHIVE_BASE_URL,
         transport: SECTransport | None = None,
         timeout: float = DEFAULT_TIMEOUT_SECONDS,
         max_retries: int = DEFAULT_MAX_RETRIES,
@@ -111,6 +118,7 @@ class SECClient:
         self._user_agent = _user_agent(user_agent)
         self._raw_vault = raw_vault
         self._base_url = _base_url(base_url)
+        self._archive_base_url = _base_url(archive_base_url)
         self._transport = transport or UrllibSECTransport()
         self._timeout = _positive_number(timeout, "timeout")
         self._max_retries = _max_retries(max_retries)
@@ -124,7 +132,49 @@ class SECClient:
     def fetch_companyfacts(self, cik: str | int) -> SECRawResponse:
         """Fetch SEC companyfacts JSON for one CIK and raw-vault exact bytes."""
         request = self._companyfacts_request(cik)
-        return self._get_with_retries(request)
+        return self._get_with_retries(
+            request,
+            audit_contract=SEC_COMPANYFACTS_AUDIT_CONTRACT,
+        )
+
+    def fetch_submissions(self, cik: str | int) -> SECRawResponse:
+        """Fetch SEC submissions JSON for one CIK and raw-vault exact bytes."""
+        request = self._submissions_request(cik)
+        return self._get_with_retries(
+            request,
+            audit_contract=SEC_SUBMISSIONS_AUDIT_CONTRACT,
+        )
+
+    def fetch_archive_index(
+        self,
+        *,
+        cik: str | int,
+        accession_number: str,
+    ) -> SECRawResponse:
+        """Fetch an SEC accession archive directory index and raw-vault it."""
+        request = self._archive_index_request(cik, accession_number)
+        return self._get_with_retries(
+            request,
+            audit_contract=SEC_ARCHIVE_INDEX_AUDIT_CONTRACT,
+        )
+
+    def fetch_archive_document(
+        self,
+        *,
+        cik: str | int,
+        accession_number: str,
+        document_name: str,
+    ) -> SECRawResponse:
+        """Fetch one SEC accession document and raw-vault exact bytes."""
+        request = self._archive_document_request(
+            cik,
+            accession_number=accession_number,
+            document_name=document_name,
+        )
+        return self._get_with_retries(
+            request,
+            audit_contract=SEC_ARCHIVE_DOCUMENT_AUDIT_CONTRACT,
+        )
 
     def _companyfacts_request(self, cik: str | int) -> _SECRequest:
         normalized_cik = _cik(cik)
@@ -135,7 +185,65 @@ class SECClient:
             vault_params={"cik": normalized_cik},
         )
 
-    def _get_with_retries(self, request: _SECRequest) -> SECRawResponse:
+    def _submissions_request(self, cik: str | int) -> _SECRequest:
+        normalized_cik = _cik(cik)
+        endpoint = f"/submissions/CIK{normalized_cik}.json"
+        return _SECRequest(
+            endpoint=endpoint,
+            request_url=f"{self._base_url}{endpoint}",
+            vault_params={"cik": normalized_cik},
+        )
+
+    def _archive_index_request(
+        self,
+        cik: str | int,
+        accession_number: str,
+    ) -> _SECRequest:
+        normalized_cik = _cik(cik)
+        normalized_accession = _accession_number(accession_number)
+        accession_path = normalized_accession.replace("-", "")
+        endpoint = f"/Archives/edgar/data/{int(normalized_cik)}/{accession_path}/index.json"
+        return _SECRequest(
+            endpoint=endpoint,
+            request_url=f"{self._archive_base_url}{endpoint}",
+            vault_params={
+                "accession_number": normalized_accession,
+                "cik": normalized_cik,
+            },
+        )
+
+    def _archive_document_request(
+        self,
+        cik: str | int,
+        *,
+        accession_number: str,
+        document_name: str,
+    ) -> _SECRequest:
+        normalized_cik = _cik(cik)
+        normalized_accession = _accession_number(accession_number)
+        normalized_document = _document_name(document_name)
+        accession_path = normalized_accession.replace("-", "")
+        endpoint = (
+            f"/Archives/edgar/data/{int(normalized_cik)}/{accession_path}/"
+            f"{normalized_document}"
+        )
+        return _SECRequest(
+            endpoint=endpoint,
+            request_url=f"{self._archive_base_url}{endpoint}",
+            vault_params={
+                "accession_number": normalized_accession,
+                "cik": normalized_cik,
+                "document_name": normalized_document,
+            },
+            accept="text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        )
+
+    def _get_with_retries(
+        self,
+        request: _SECRequest,
+        *,
+        audit_contract: str,
+    ) -> SECRawResponse:
         max_attempts = self._max_retries + 1
         for attempt in range(1, max_attempts + 1):
             response = self._get_once(request)
@@ -155,7 +263,7 @@ class SECClient:
                 request=request,
                 response=response,
                 metadata={
-                    "audit_contract": SEC_COMPANYFACTS_AUDIT_CONTRACT,
+                    "audit_contract": audit_contract,
                     "attempt_number": attempt,
                     "max_retries": self._max_retries,
                     "max_attempts": max_attempts,
@@ -184,7 +292,7 @@ class SECClient:
             response = self._transport.get(
                 request.request_url,
                 headers={
-                    "Accept": "application/json",
+                    "Accept": request.accept,
                     "User-Agent": self._user_agent,
                 },
                 timeout=self._timeout,
@@ -300,6 +408,26 @@ def _cik(value: str | int) -> str:
     if not raw.isdigit() or len(raw) > 10:
         raise SECConfigurationError("cik must contain 1 to 10 digits")
     return raw.zfill(10)
+
+
+def _accession_number(value: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise SECConfigurationError("accession_number must be a non-empty string")
+    normalized = value.strip()
+    if not re.fullmatch(r"\d{10}-\d{2}-\d{6}", normalized):
+        raise SECConfigurationError(
+            "accession_number must look like 0000320193-26-000011"
+        )
+    return normalized
+
+
+def _document_name(value: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise SECConfigurationError("document_name must be a non-empty string")
+    normalized = value.strip()
+    if "/" in normalized or "\\" in normalized or normalized in {".", ".."}:
+        raise SECConfigurationError("document_name must be a single archive filename")
+    return urllib.parse.quote(normalized, safe="._-")
 
 
 def _positive_number(value: float, name: str) -> float:
