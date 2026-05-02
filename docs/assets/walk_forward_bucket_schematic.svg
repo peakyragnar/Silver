@@ -1,0 +1,107 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 760" role="img" aria-labelledby="title desc">
+  <title id="title">Silver walk-forward bucket schematic</title>
+  <desc id="desc">A two-panel timeline showing daily feature and label construction, then non-overlapping walk-forward test buckets with training, embargo, testing, and future label availability.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#23364a"/>
+    </marker>
+    <style>
+      .bg { fill: #f7f4ee; }
+      .panel { fill: #ffffff; stroke: #d8d2c7; stroke-width: 1.5; }
+      .title { fill: #17212f; font: 700 30px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      .subtitle { fill: #4d5b6c; font: 500 17px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      .label { fill: #17212f; font: 700 18px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      .small { fill: #4d5b6c; font: 500 15px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      .tiny { fill: #4d5b6c; font: 500 13px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      .axis { stroke: #23364a; stroke-width: 3; marker-end: url(#arrow); }
+      .tick { stroke: #23364a; stroke-width: 2; }
+      .lookback { fill: #d9ecff; stroke: #4c85b9; stroke-width: 1.5; }
+      .skip { fill: #f4dfaa; stroke: #b78b2e; stroke-width: 1.5; }
+      .labelwin { fill: #dff0d7; stroke: #6a9d55; stroke-width: 1.5; }
+      .train { fill: #e3edf8; stroke: #5b82aa; stroke-width: 1.5; }
+      .embargo { fill: #f7e6b8; stroke: #b78b2e; stroke-width: 1.5; }
+      .test { fill: #d8efe5; stroke: #4d9274; stroke-width: 1.5; }
+      .future { fill: #eadcf6; stroke: #8b63ad; stroke-width: 1.5; }
+      .bucket { fill: none; stroke: #17212f; stroke-width: 2; stroke-dasharray: 7 6; }
+      .note { fill: #fff8e8; stroke: #d2a64a; stroke-width: 1.5; }
+    </style>
+  </defs>
+
+  <rect class="bg" x="0" y="0" width="1280" height="760"/>
+  <text class="title" x="56" y="58">Walk-forward buckets: what gets scored</text>
+  <text class="subtitle" x="56" y="88">Daily rows are built first. Buckets then group those rows into honest chronological tests.</text>
+
+  <rect class="panel" x="48" y="122" width="1184" height="242" rx="12"/>
+  <text class="label" x="80" y="162">1. One daily feature and label row</text>
+  <text class="small" x="80" y="188">Example: momentum_6_1 at as-of date T, tested against a 63-session forward return.</text>
+
+  <line class="axis" x1="114" y1="274" x2="1130" y2="274"/>
+  <line class="tick" x1="190" y1="250" x2="190" y2="298"/>
+  <line class="tick" x1="620" y1="250" x2="620" y2="298"/>
+  <line class="tick" x1="800" y1="250" x2="800" y2="298"/>
+  <line class="tick" x1="1030" y1="250" x2="1030" y2="298"/>
+
+  <rect class="lookback" x="190" y="220" width="430" height="48" rx="8"/>
+  <rect class="skip" x="620" y="220" width="180" height="48" rx="8"/>
+  <rect class="labelwin" x="800" y="220" width="230" height="48" rx="8"/>
+
+  <text class="small" x="203" y="249">feature lookback: T-126 to T-21</text>
+  <text class="small" x="663" y="249">skip recent 21</text>
+  <text class="small" x="835" y="249">label: T to T+63</text>
+
+  <text class="tiny" x="168" y="327">T-126</text>
+  <text class="tiny" x="600" y="327">T-21</text>
+  <text class="tiny" x="793" y="327">T</text>
+  <text class="tiny" x="1008" y="327">T+63</text>
+  <text class="tiny" x="792" y="207">rank tickers here</text>
+
+  <rect class="panel" x="48" y="394" width="1184" height="314" rx="12"/>
+  <text class="label" x="80" y="434">2. Walk-forward buckets across history</text>
+  <text class="small" x="80" y="460">Current default for a 63-session horizon: 252 train sessions, 63-session embargo, 63-session test bucket, then shift forward 63 sessions.</text>
+
+  <line class="axis" x1="112" y1="576" x2="1130" y2="576"/>
+
+  <rect class="bucket" x="104" y="494" width="548" height="142" rx="10"/>
+  <text class="tiny" x="116" y="514">bucket 1</text>
+  <rect class="train" x="128" y="532" width="230" height="54" rx="8"/>
+  <rect class="embargo" x="358" y="532" width="94" height="54" rx="8"/>
+  <rect class="test" x="452" y="532" width="94" height="54" rx="8"/>
+  <rect class="future" x="546" y="532" width="94" height="54" rx="8"/>
+  <text class="tiny" x="176" y="556">train</text>
+  <text class="tiny" x="167" y="575">252 sessions</text>
+  <text class="tiny" x="373" y="556">embargo</text>
+  <text class="tiny" x="383" y="575">63</text>
+  <text class="tiny" x="480" y="556">test</text>
+  <text class="tiny" x="482" y="575">63</text>
+  <text class="tiny" x="563" y="556">labels</text>
+  <text class="tiny" x="570" y="575">T+63</text>
+
+  <rect class="bucket" x="284" y="604" width="548" height="74" rx="10"/>
+  <text class="tiny" x="296" y="625">bucket 2 starts 63 sessions later</text>
+  <rect class="train" x="308" y="640" width="230" height="26" rx="6"/>
+  <rect class="embargo" x="538" y="640" width="94" height="26" rx="6"/>
+  <rect class="test" x="632" y="640" width="94" height="26" rx="6"/>
+  <rect class="future" x="726" y="640" width="94" height="26" rx="6"/>
+
+  <path d="M 650 560 C 700 548, 746 548, 796 560" fill="none" stroke="#23364a" stroke-width="2.5" marker-end="url(#arrow)"/>
+  <text class="tiny" x="680" y="536">shift 63 sessions</text>
+
+  <rect class="bucket" x="488" y="494" width="548" height="142" rx="10"/>
+  <text class="tiny" x="500" y="514">bucket 3 and onward</text>
+  <rect class="train" x="512" y="532" width="230" height="54" rx="8"/>
+  <rect class="embargo" x="742" y="532" width="94" height="54" rx="8"/>
+  <rect class="test" x="836" y="532" width="94" height="54" rx="8"/>
+  <rect class="future" x="930" y="532" width="94" height="54" rx="8"/>
+  <text class="tiny" x="552" y="556">train grows</text>
+  <text class="tiny" x="548" y="575">past-known rows</text>
+  <text class="tiny" x="757" y="556">embargo</text>
+  <text class="tiny" x="767" y="575">63</text>
+  <text class="tiny" x="864" y="556">test</text>
+  <text class="tiny" x="866" y="575">63</text>
+  <text class="tiny" x="947" y="556">labels</text>
+  <text class="tiny" x="954" y="575">T+63</text>
+
+  <rect class="note" x="865" y="630" width="300" height="48" rx="8"/>
+  <text class="tiny" x="884" y="652">Each bucket stores one result:</text>
+  <text class="tiny" x="884" y="670">strategy net return minus baseline</text>
+</svg>

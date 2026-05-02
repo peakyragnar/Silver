@@ -14,6 +14,7 @@ from silver.features.candidate_pack import (
     FeatureCandidate,
     load_feature_candidates,
 )
+from silver.time.trading_calendar import CANONICAL_HORIZONS
 
 
 class ResearchResultsError(ValueError):
@@ -29,10 +30,30 @@ class ResearchResultsJsonClient(Protocol):
 
 
 @dataclass(frozen=True, slots=True)
+class WalkForwardBucket:
+    """One persisted walk-forward test-window result."""
+
+    test_start: str | None
+    test_end: str | None
+    net_difference_vs_baseline: float
+
+    @property
+    def sign(self) -> str:
+        return "+" if self.net_difference_vs_baseline > 0 else "-"
+
+    @property
+    def year(self) -> str:
+        if self.test_start and len(self.test_start) >= 4:
+            return self.test_start[:4]
+        return "unknown"
+
+
+@dataclass(frozen=True, slots=True)
 class ResearchResultRow:
     """One hypothesis plus its latest linked falsifier evidence."""
 
     hypothesis_key: str
+    base_hypothesis_key: str
     hypothesis_name: str
     family: str
     feature_name: str
@@ -49,6 +70,7 @@ class ResearchResultRow:
     backtest_run_key: str | None
     model_run_key: str | None
     scored_test_dates: int | None
+    walk_forward_buckets: tuple[WalkForwardBucket, ...]
 
     @property
     def tested(self) -> bool:
@@ -60,6 +82,7 @@ class ResearchResultsReport:
     """Complete operator-facing research results rollup."""
 
     results: tuple[ResearchResultRow, ...]
+    candidates: tuple[FeatureCandidate, ...] = ()
 
     @property
     def tested_count(self) -> int:
@@ -108,6 +131,7 @@ def load_research_results_report(
     if not isinstance(payload, list):
         raise ResearchResultsError("research results query returned non-list JSON")
     return ResearchResultsReport(
+        candidates=candidate_rows,
         results=tuple(
             _research_result_row(raw, candidates_by_key)
             for raw in payload
@@ -136,6 +160,12 @@ def render_research_results_report(report: ResearchResultsReport) -> str:
         "",
         "By Verdict:",
         _verdict_table(report.results),
+        "",
+        "Horizon Matrix:",
+        _horizon_matrix(report),
+        "",
+        "Bucket Heatmaps:",
+        _bucket_heatmap_table(report.results),
         "",
         "Results:",
         _results_table(report.results),
@@ -166,7 +196,13 @@ def _research_result_row(
 ) -> ResearchResultRow:
     row = _required_mapping(raw, "research result row")
     hypothesis_key = _required_str(row, "hypothesis_key")
-    candidate = candidates_by_key.get(hypothesis_key)
+    hypothesis_metadata = _mapping(row.get("hypothesis_metadata"), "hypothesis_metadata")
+    base_hypothesis_key = _base_hypothesis_key(
+        hypothesis_key,
+        hypothesis_metadata=hypothesis_metadata,
+        candidates_by_key=candidates_by_key,
+    )
+    candidate = candidates_by_key.get(base_hypothesis_key)
     backtest_parameters = _mapping(row.get("backtest_parameters"), "backtest_parameters")
     model_parameters = _mapping(row.get("model_parameters"), "model_parameters")
     metrics = _mapping(row.get("backtest_metrics"), "backtest_metrics")
@@ -186,6 +222,10 @@ def _research_result_row(
         _selection_direction(
             _parameter_str(backtest_parameters, "selection_direction")
             or _parameter_str(model_parameters, "selection_direction")
+            or _optional_str(
+                hypothesis_metadata.get("selection_direction"),
+                "hypothesis_metadata.selection_direction",
+            )
             or (candidate.selection_direction if candidate is not None else "high")
         )
     )
@@ -218,6 +258,7 @@ def _research_result_row(
 
     return ResearchResultRow(
         hypothesis_key=hypothesis_key,
+        base_hypothesis_key=base_hypothesis_key,
         hypothesis_name=_required_str(row, "hypothesis_name"),
         family=_family_for(candidate, feature_name),
         feature_name=feature_name,
@@ -243,6 +284,7 @@ def _research_result_row(
             metrics.get("scored_test_dates"),
             "scored_test_dates",
         ),
+        walk_forward_buckets=_walk_forward_buckets(metrics),
     )
 
 
@@ -297,6 +339,7 @@ FROM (
         h.universe_name AS hypothesis_universe_name,
         h.horizon_days AS hypothesis_horizon_days,
         h.target_kind AS hypothesis_target_kind,
+        h.metadata AS hypothesis_metadata,
         le.evaluation_status,
         le.failure_reason,
         le.notes AS evaluation_notes,
@@ -345,6 +388,28 @@ def _family_for(candidate: FeatureCandidate | None, feature_name: str) -> str:
     return "price"
 
 
+def _base_hypothesis_key(
+    hypothesis_key: str,
+    *,
+    hypothesis_metadata: Mapping[str, Any],
+    candidates_by_key: Mapping[str, FeatureCandidate],
+) -> str:
+    metadata_base = _optional_str(
+        hypothesis_metadata.get("base_hypothesis_key"),
+        "hypothesis_metadata.base_hypothesis_key",
+    )
+    if metadata_base:
+        return metadata_base
+    if hypothesis_key in candidates_by_key:
+        return hypothesis_key
+    suffix_marker = "__h"
+    if suffix_marker in hypothesis_key:
+        candidate_key = hypothesis_key.rsplit(suffix_marker, maxsplit=1)[0]
+        if candidate_key in candidates_by_key:
+            return candidate_key
+    return hypothesis_key
+
+
 def _baseline_net_return(baseline_metrics: Mapping[str, Any]) -> float | None:
     equal_weight = baseline_metrics.get("equal_weight_universe")
     if not isinstance(equal_weight, Mapping):
@@ -372,6 +437,56 @@ def _baseline_difference(
     if strategy_net_return is None or baseline_net_return is None:
         return None
     return strategy_net_return - baseline_net_return
+
+
+def _walk_forward_buckets(metrics: Mapping[str, Any]) -> tuple[WalkForwardBucket, ...]:
+    raw_windows = metrics.get("walk_forward_windows")
+    if raw_windows is None:
+        return ()
+    if not isinstance(raw_windows, list):
+        raise ResearchResultsError("walk_forward_windows must be a list")
+    buckets: list[WalkForwardBucket] = []
+    for index, raw_window in enumerate(raw_windows):
+        if not isinstance(raw_window, Mapping):
+            raise ResearchResultsError("walk_forward_windows entries must be objects")
+        net_difference = _window_net_difference(raw_window, index=index)
+        buckets.append(
+            WalkForwardBucket(
+                test_start=_optional_str(
+                    raw_window.get("test_start"),
+                    f"walk_forward_windows[{index}].test_start",
+                ),
+                test_end=_optional_str(
+                    raw_window.get("test_end"),
+                    f"walk_forward_windows[{index}].test_end",
+                ),
+                net_difference_vs_baseline=net_difference,
+            )
+        )
+    return tuple(buckets)
+
+
+def _window_net_difference(window: Mapping[str, Any], *, index: int) -> float:
+    value = _optional_float(
+        window.get("net_difference_vs_baseline"),
+        f"walk_forward_windows[{index}].net_difference_vs_baseline",
+    )
+    if value is not None:
+        return value
+    strategy = _optional_float(
+        window.get("strategy_net_return"),
+        f"walk_forward_windows[{index}].strategy_net_return",
+    )
+    baseline = _optional_float(
+        window.get("baseline_net_return"),
+        f"walk_forward_windows[{index}].baseline_net_return",
+    )
+    if strategy is None or baseline is None:
+        raise ResearchResultsError(
+            "walk_forward_windows entries must include net_difference_vs_baseline "
+            "or strategy/baseline net returns"
+        )
+    return strategy - baseline
 
 
 def _family_table(results: Sequence[ResearchResultRow]) -> str:
@@ -450,6 +565,117 @@ def _results_table(results: Sequence[ResearchResultRow]) -> str:
             "Backtest",
         ),
         rows,
+    )
+
+
+def _horizon_matrix(report: ResearchResultsReport) -> str:
+    results_by_cell: dict[tuple[str, int], ResearchResultRow] = {}
+    for result in report.results:
+        if result.horizon_days is None:
+            continue
+        results_by_cell[(result.base_hypothesis_key, result.horizon_days)] = result
+
+    rows: list[tuple[str, ...]] = []
+    seen: set[str] = set()
+    for candidate in report.candidates:
+        seen.add(candidate.hypothesis_key)
+        rows.append(
+            _horizon_matrix_row(
+                base_key=candidate.hypothesis_key,
+                family=_family_for(candidate, candidate.signal_name),
+                feature_name=candidate.signal_name,
+                results_by_cell=results_by_cell,
+            )
+        )
+
+    unknown_base_keys = sorted(
+        {
+            result.base_hypothesis_key
+            for result in report.results
+            if result.base_hypothesis_key not in seen
+        }
+    )
+    for base_key in unknown_base_keys:
+        base_results = [
+            result for result in report.results if result.base_hypothesis_key == base_key
+        ]
+        first = base_results[0]
+        rows.append(
+            _horizon_matrix_row(
+                base_key=base_key,
+                family=first.family,
+                feature_name=first.feature_name,
+                results_by_cell=results_by_cell,
+            )
+        )
+
+    if not rows:
+        return "No candidate horizon cells found."
+    return _table(
+        ("Hypothesis", "Family", "Feature", "5", "21", "63", "126", "252"),
+        rows,
+    )
+
+
+def _horizon_matrix_row(
+    *,
+    base_key: str,
+    family: str,
+    feature_name: str,
+    results_by_cell: Mapping[tuple[str, int], ResearchResultRow],
+) -> tuple[str, ...]:
+    return (
+        base_key,
+        family,
+        feature_name,
+        *(
+            _horizon_cell(results_by_cell.get((base_key, horizon)))
+            for horizon in CANONICAL_HORIZONS
+        ),
+    )
+
+
+def _horizon_cell(result: ResearchResultRow | None) -> str:
+    if result is None:
+        return "pending"
+    if result.verdict in {"accepted", "promising", "running", "untested"}:
+        return result.verdict
+    return f"{result.verdict}:{result.failure_reason}"
+
+
+def _bucket_heatmap_table(results: Sequence[ResearchResultRow]) -> str:
+    rows: list[tuple[str, ...]] = []
+    for result in sorted(
+        (row for row in results if row.walk_forward_buckets),
+        key=lambda row: (
+            row.base_hypothesis_key,
+            -1 if row.horizon_days is None else row.horizon_days,
+        ),
+    ):
+        positive = sum(1 for bucket in result.walk_forward_buckets if bucket.sign == "+")
+        rows.append(
+            (
+                result.base_hypothesis_key,
+                _int_or_na(result.horizon_days),
+                f"{positive}/{len(result.walk_forward_buckets)}",
+                _bucket_heatmap(result.walk_forward_buckets),
+                "`+` beat baseline; `-` failed baseline.",
+            )
+        )
+    if not rows:
+        return "No walk-forward bucket windows found."
+    return _table(
+        ("Hypothesis", "Horizon", "Positive buckets", "Heatmap", "Legend"),
+        rows,
+    )
+
+
+def _bucket_heatmap(buckets: Sequence[WalkForwardBucket]) -> str:
+    by_year: dict[str, list[str]] = {}
+    for bucket in buckets:
+        by_year.setdefault(bucket.year, []).append(bucket.sign)
+    return " ".join(
+        f"{year}:{''.join(signs)}" for year, signs in sorted(by_year.items())
     )
 
 

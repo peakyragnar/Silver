@@ -151,7 +151,35 @@ pack without changing Python runner code. The YAML owns candidate identity,
 thesis text, source feature, ranking direction, and materializer name; Python
 still owns the allowed materializers and point-in-time calculations.
 
-## 5. Run The Falsifier
+## 5. Walk-Forward Bucket Schematic
+
+The falsifier uses two separate clocks:
+
+1. Daily feature/label construction creates one row per valid ticker/date.
+2. Walk-forward scoring groups those daily rows into non-overlapping test
+   buckets and checks whether performance is stable over time.
+
+For one ticker and one as-of date `T`, a `momentum_6_1` row with a 63-session
+label, the clocks look like this:
+
+![Walk-forward bucket schematic](assets/walk_forward_bucket_schematic.svg)
+
+Inside each test bucket, every available trading day is scored:
+
+```text
+for each test date in the 63-session bucket:
+  rank eligible tickers by the feature
+  select the configured high or low half
+  compare selected forward return to the equal-weight baseline
+
+bucket result = mean selected net return - mean baseline net return
+```
+
+The walk-forward verdict compares all scored buckets. A candidate is unstable
+when too few buckets beat the baseline or when the average bucket difference is
+not positive.
+
+## 6. Run The Falsifier
 
 Validate the falsifier CLI/config/report path first:
 
@@ -213,7 +241,7 @@ and names the drifted field, such as `backtest_runs.metrics`. Use
 than the numeric id. A `model_run_id` alone is not accepted for full replay
 because one model run can support multiple backtest claims.
 
-## 6. Register The Hypothesis
+## 7. Register The Hypothesis
 
 After a falsifier run and replay pass, record the testable idea in the
 hypothesis registry and link it to the durable backtest evidence. Validate the
@@ -290,7 +318,7 @@ Recording an evaluation moves the hypothesis status to `promising`,
 `rejected`, `accepted`, or `running`; failed backtest execution does not by
 itself retire a hypothesis.
 
-## 7. Summarize Research Results
+## 8. Summarize Research Results
 
 Generate the research cockpit after candidate evaluations are linked:
 
@@ -310,7 +338,48 @@ horizons, strategy-vs-baseline results, rejection reasons, untested hypotheses,
 and suggested next tests. It is a navigation layer only; durable
 `backtest_runs` and `model_runs` rows remain the authoritative evidence.
 
-## 8. Read The Falsifier Report
+### Horizon Sweep And Bucket Heatmap
+
+The research cockpit summarizes linked evaluations and now includes a horizon
+matrix plus bucket heatmaps when horizon-sweep rows exist. As of the first
+candidate-pack run, the live evaluations are all at the 63-trading-day horizon.
+The sweep build is documented in:
+
+```text
+docs/exec-plans/active/horizon-sweep-bucket-heatmap-v0.md
+```
+
+Validate the sweep runner without connecting to Postgres:
+
+```bash
+python scripts/run_feature_candidate_horizon_sweep.py --check
+```
+
+Run the full canonical sweep after feature candidates and forward labels exist:
+
+```bash
+python scripts/run_feature_candidate_horizon_sweep.py --universe falsifier_seed
+```
+
+The command evaluates each configured candidate across the canonical horizons:
+
+```text
+5, 21, 63, 126, 252
+```
+
+By default, existing linked cells are skipped rather than rerun. Use
+`--rerun-existing` when you intentionally want to refresh already-linked
+evidence. After the sweep, regenerate the research report to see the populated
+matrix and heatmaps:
+
+```bash
+python scripts/research_results_report.py
+```
+
+Do not add AI-generated hypotheses until this matrix is populated; otherwise
+the AI will be proposing into a partially mapped search space.
+
+## 9. Read The Falsifier Report
 
 Start with `Status`, `Data Coverage`, and `Failure Modes`. Then check
 `Headline Metrics`, `Baseline Comparison`, `Costs Assumption`, and

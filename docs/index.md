@@ -49,6 +49,8 @@ and humans building Silver.
 - [`objectives/completed/`](objectives/completed/): completed Objective
   handoffs
 - [`exec-plans/active/`](exec-plans/active/): current implementation plans
+- [`exec-plans/active/horizon-sweep-bucket-heatmap-v0.md`](exec-plans/active/horizon-sweep-bucket-heatmap-v0.md):
+  next research cockpit build for canonical horizon sweeps and bucket heatmaps
 - [`exec-plans/completed/`](exec-plans/completed/): completed plans and handoffs
 
 ## Documentation Rule

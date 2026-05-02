@@ -84,6 +84,84 @@ def test_loader_uses_read_only_registry_sql() -> None:
     assert "DELETE " not in upper_sql
 
 
+def test_render_groups_horizon_sweep_rows_into_matrix_and_heatmap() -> None:
+    payload = [
+        *_payload(),
+        {
+            "hypothesis_key": "momentum_12_1__h21",
+            "hypothesis_name": "Momentum 12-1 (21d)",
+            "hypothesis_status": "rejected",
+            "hypothesis_signal_name": "momentum_12_1",
+            "hypothesis_universe_name": "falsifier_seed",
+            "hypothesis_horizon_days": 21,
+            "hypothesis_target_kind": "raw_return",
+            "hypothesis_metadata": {
+                "base_hypothesis_key": "momentum_12_1",
+                "horizon_sweep": True,
+                "selection_direction": "high",
+            },
+            "evaluation_status": "rejected",
+            "failure_reason": "walk_forward_unstable",
+            "backtest_run_id": 104,
+            "backtest_run_key": "backtest-momentum-h21",
+            "backtest_status": "succeeded",
+            "backtest_universe_name": "falsifier_seed",
+            "backtest_horizon_days": 21,
+            "backtest_target_kind": "raw_return",
+            "backtest_parameters": {"strategy": "momentum_12_1"},
+            "backtest_metrics": {
+                "mean_strategy_net_horizon_return": 0.012,
+                "scored_test_dates": 126,
+                "walk_forward_windows": [
+                    {
+                        "test_start": "2015-01-02",
+                        "test_end": "2015-01-30",
+                        "net_difference_vs_baseline": 0.01,
+                    },
+                    {
+                        "test_start": "2015-02-02",
+                        "test_end": "2015-02-27",
+                        "net_difference_vs_baseline": -0.02,
+                    },
+                ],
+            },
+            "baseline_metrics": {
+                "equal_weight_universe": {
+                    "mean_net_horizon_return": 0.011,
+                },
+                "strategy_vs_equal_weight_universe": {
+                    "mean_net_difference": 0.001,
+                },
+            },
+            "label_scramble_metrics": {
+                "status": "completed",
+                "p_value": 0.01,
+                "alpha": 0.05,
+            },
+            "label_scramble_pass": True,
+            "model_run_id": 204,
+            "model_run_key": "model-momentum-h21",
+            "model_status": "succeeded",
+            "model_parameters": {"strategy": "momentum_12_1"},
+        },
+    ]
+
+    report = load_research_results_report(FakeJsonClient(payload))
+    rendered = render_research_results_report(report)
+
+    assert "Horizon Matrix:" in rendered
+    assert (
+        "| momentum_12_1 | price | momentum_12_1 | pending | "
+        "rejected:walk_forward_unstable | rejected:baseline_failed | "
+        "pending | pending |"
+    ) in rendered
+    assert "Bucket Heatmaps:" in rendered
+    assert (
+        "| momentum_12_1 | 21 | 1/2 | 2015:+- | "
+        "`+` beat baseline; `-` failed baseline. |"
+    ) in rendered
+
+
 def test_check_cli_validates_without_database_url() -> None:
     result = subprocess.run(
         [sys.executable, str(SCRIPT), "--check"],
@@ -120,6 +198,7 @@ def _payload() -> list[dict[str, Any]]:
             "hypothesis_universe_name": "falsifier_seed",
             "hypothesis_horizon_days": 63,
             "hypothesis_target_kind": "raw_return",
+            "hypothesis_metadata": {},
             "evaluation_status": "rejected",
             "failure_reason": None,
             "backtest_run_id": 101,
@@ -132,6 +211,13 @@ def _payload() -> list[dict[str, Any]]:
             "backtest_metrics": {
                 "mean_strategy_net_horizon_return": 0.0446,
                 "scored_test_dates": 189,
+                "walk_forward_windows": [
+                    {
+                        "test_start": "2016-01-04",
+                        "test_end": "2016-04-04",
+                        "net_difference_vs_baseline": -0.0004,
+                    }
+                ],
             },
             "baseline_metrics": {
                 "equal_weight_universe": {
@@ -160,6 +246,7 @@ def _payload() -> list[dict[str, Any]]:
             "hypothesis_universe_name": "falsifier_seed",
             "hypothesis_horizon_days": 63,
             "hypothesis_target_kind": "raw_return",
+            "hypothesis_metadata": {},
             "evaluation_status": "rejected",
             "failure_reason": None,
             "backtest_run_id": 102,
@@ -200,6 +287,7 @@ def _payload() -> list[dict[str, Any]]:
             "hypothesis_universe_name": "falsifier_seed",
             "hypothesis_horizon_days": 63,
             "hypothesis_target_kind": "raw_return",
+            "hypothesis_metadata": {},
             "evaluation_status": "rejected",
             "failure_reason": "insufficient_data",
             "backtest_run_id": 103,
@@ -232,6 +320,7 @@ def _payload() -> list[dict[str, Any]]:
             "hypothesis_universe_name": "falsifier_seed",
             "hypothesis_horizon_days": None,
             "hypothesis_target_kind": None,
+            "hypothesis_metadata": {},
             "evaluation_status": None,
             "failure_reason": None,
             "backtest_run_id": None,
