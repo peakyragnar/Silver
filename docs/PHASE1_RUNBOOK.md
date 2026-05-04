@@ -415,8 +415,9 @@ hypotheses or promoting anything to accepted evidence. The operating guide is:
 docs/PROMISING_CANDIDATE_REVIEW_V0.md
 ```
 
-The generated cockpit includes a `Promising Candidate Review` table that labels
-each promising cell as `deep_dive`, `watch`, or `demote`. It does not mutate
+The generated cockpit includes a terminal-friendly `Promising Candidate
+Summary` plus a wider `Promising Candidate Review` table. Both label each
+promising cell as `deep_dive`, `watch`, or `demote`. They do not mutate
 hypothesis status. The goal is to decide where to spend the next research cycle
 before widening the search space.
 

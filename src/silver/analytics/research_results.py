@@ -170,6 +170,9 @@ def render_research_results_report(report: ResearchResultsReport) -> str:
         "Bucket Heatmaps:",
         _bucket_heatmap_table(report.results),
         "",
+        "Promising Candidate Summary:",
+        *_promising_candidate_summary_lines(report.results),
+        "",
         "Promising Candidate Review:",
         _promising_candidate_review_table(report.results),
         "",
@@ -707,21 +710,11 @@ def _bucket_heatmap(buckets: Sequence[WalkForwardBucket]) -> str:
 
 
 def _promising_candidate_review_table(results: Sequence[ResearchResultRow]) -> str:
-    promising = sorted(
-        (result for result in results if result.verdict == "promising"),
-        key=lambda result: (
-            result.base_hypothesis_key,
-            -1 if result.horizon_days is None else result.horizon_days,
-        ),
-    )
+    promising = _promising_results(results)
     if not promising:
         return "No promising cells found."
 
-    results_by_cell = {
-        (result.base_hypothesis_key, result.horizon_days): result
-        for result in results
-        if result.horizon_days is not None
-    }
+    results_by_cell = _results_by_cell(results)
     rows: list[tuple[str, ...]] = []
     for result in promising:
         recommendation, reason = _promising_recommendation(result, results_by_cell)
@@ -752,6 +745,56 @@ def _promising_candidate_review_table(results: Sequence[ResearchResultRow]) -> s
         ),
         rows,
     )
+
+
+def _promising_candidate_summary_lines(
+    results: Sequence[ResearchResultRow],
+) -> list[str]:
+    promising = _promising_results(results)
+    if not promising:
+        return ["No promising cells found."]
+
+    results_by_cell = _results_by_cell(results)
+    lines: list[str] = []
+    for index, result in enumerate(promising, start=1):
+        recommendation, reason = _promising_recommendation(result, results_by_cell)
+        if lines:
+            lines.append("")
+        lines.extend(
+            [
+                f"{index}. {result.hypothesis_key}",
+                f"   recommendation: {recommendation}",
+                f"   horizon: {_int_or_na(result.horizon_days)} trading sessions",
+                f"   edge: {_signed_percent(result.net_difference_vs_baseline)}",
+                f"   buckets: {_positive_bucket_text(result)}",
+                f"   label scramble: {_label_scramble_text(result)}",
+                f"   cost sensitivity: {_cost_sensitivity_text(result)}",
+                f"   reason: {reason}",
+            ]
+        )
+    return lines
+
+
+def _promising_results(
+    results: Sequence[ResearchResultRow],
+) -> list[ResearchResultRow]:
+    return sorted(
+        (result for result in results if result.verdict == "promising"),
+        key=lambda result: (
+            result.base_hypothesis_key,
+            -1 if result.horizon_days is None else result.horizon_days,
+        ),
+    )
+
+
+def _results_by_cell(
+    results: Sequence[ResearchResultRow],
+) -> dict[tuple[str, int], ResearchResultRow]:
+    return {
+        (result.base_hypothesis_key, result.horizon_days): result
+        for result in results
+        if result.horizon_days is not None
+    }
 
 
 def _positive_bucket_text(result: ResearchResultRow) -> str:
@@ -1117,6 +1160,12 @@ def _percent(value: float | None) -> str:
     if value is None:
         return "n/a"
     return f"{value * 100:.4f}%"
+
+
+def _signed_percent(value: float | None) -> str:
+    if value is None:
+        return "n/a"
+    return f"{value * 100:+.4f}%"
 
 
 def _int_or_na(value: int | None) -> str:

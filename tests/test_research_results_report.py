@@ -68,6 +68,8 @@ def test_render_research_results_report_summarizes_candidate_verdicts() -> None:
         "| not_run | The hypothesis exists in the registry but no linked "
         "falsifier evaluation is available yet. |"
     ) in rendered
+    assert "Promising Candidate Summary:" in rendered
+    assert "No promising cells found." in rendered
     assert "Promising Candidate Review:" in rendered
     assert "No promising cells found." in rendered
 
@@ -286,6 +288,18 @@ def test_render_promising_candidate_review_recommends_next_actions() -> None:
     report = load_research_results_report(FakeJsonClient(payload))
     rendered = render_research_results_report(report)
 
+    assert "Promising Candidate Summary:" in rendered
+    assert (
+        "1. avg_dollar_volume_63__h252\n"
+        "   recommendation: deep_dive\n"
+        "   horizon: 252 trading sessions\n"
+        "   edge: +1.6000%\n"
+        "   buckets: 2/3 (66.7%)\n"
+        "   label scramble: pass p=0.0100 <= 0.0500\n"
+        "   cost sensitivity: low (16.0x current cost)\n"
+        "   reason: large edge with usable cost cushion; inspect drivers and "
+        "replay evidence"
+    ) in rendered
     assert "Promising Candidate Review:" in rendered
     assert (
         "| avg_dollar_volume_63__h252 | 252 | 2/3 (66.7%) | 1.6000% | "

@@ -140,11 +140,28 @@ receive `deep_dive` just because another metric looks good.
 Default to `watch` when evidence is mixed. Default to `demote` when the only
 reason to continue is that the label says `promising`.
 
-### 5. Read The Generated Review
+### 5. Read The Generated Summary And Review
 
-The research cockpit includes a `Promising Candidate Review` section derived
-from the latest linked evidence. It is read-only navigation, not a database
-status update.
+The research cockpit includes two promising-candidate sections derived from
+the same latest linked evidence. Both are read-only navigation, not database
+status updates.
+
+Use the narrow `Promising Candidate Summary` first when reading in a terminal.
+Use the wider `Promising Candidate Review` table when you need every column on
+one row.
+
+Summary row shape:
+
+```text
+1. Cell
+   recommendation: deep_dive|watch|demote
+   horizon: N trading sessions
+   edge: signed strategy-minus-baseline return
+   buckets: positive/total bucket count
+   label scramble: pass/fail plus p-value when available
+   cost sensitivity: low|medium|high|unknown
+   reason: recommendation reason
+```
 
 Minimum row shape:
 
@@ -160,6 +177,207 @@ momentum_12_1__h126 | 126 | 22/36 | +0.2648% | h63 rejected, h252 rejected | pas
 
 Use the generated recommendation as a starting point. Michael or an agent may
 override it in work notes after reading the linked backtest evidence.
+
+## How The Generated Review Works
+
+The generated review is produced by:
+
+```bash
+python scripts/research_results_report.py
+```
+
+That command reads the latest linked hypothesis evaluations from Postgres and
+writes:
+
+```text
+reports/research/results_v0.md
+```
+
+The report file is git-ignored. It is a cockpit view, not durable evidence.
+The durable evidence remains in:
+
+- `silver.hypotheses`
+- `silver.hypothesis_evaluations`
+- `silver.backtest_runs`
+- `silver.model_runs`
+
+The review does not write to the database. It only derives a recommendation
+from the latest stored rows.
+
+### Input Rows
+
+For each hypothesis/cell, the report loader reads:
+
+| Input | Used for |
+| --- | --- |
+| `hypothesis_key` | The displayed cell name, such as `avg_dollar_volume_63__h252`. |
+| `base_hypothesis_key` | Grouping related horizon cells under the same candidate. |
+| `horizon_days` | The tested forward-return horizon. |
+| `evaluation_status` and `failure_reason` | The stored registry verdict and explicit rejection reason. |
+| `backtest_runs.status` | Whether the falsifier run succeeded, failed, or had insufficient data. |
+| `backtest_runs.metrics` | Strategy return, scored dates, and walk-forward bucket windows. |
+| `backtest_runs.baseline_metrics` | Equal-weight baseline return and strategy-vs-baseline edge. |
+| `backtest_runs.label_scramble_metrics` | Label-scramble p-value and alpha threshold. |
+| `backtest_runs.label_scramble_pass` | Whether label scramble passed. |
+| `backtest_runs.cost_assumptions` | Current round-trip trading cost assumptions. |
+
+### Derived Summary And Table Columns
+
+The `Promising Candidate Summary` block and `Promising Candidate Review` table
+only include rows whose derived report verdict is `promising`.
+
+| Column | How it is computed |
+| --- | --- |
+| `Cell` | The full hypothesis key for this candidate/horizon cell. |
+| `Horizon` | The forward-return horizon in trading sessions. |
+| `Positive buckets` | Count of walk-forward buckets where strategy return beat baseline return. |
+| `Edge` | Mean strategy net return minus equal-weight baseline net return. |
+| `Adjacent horizons` | Nearby canonical horizons for the same base candidate. |
+| `Label scramble` | Pass/fail plus stored p-value and alpha when available. |
+| `Cost sensitivity` | Edge divided by current round-trip cost. |
+| `Recommendation` | A read-only operator suggestion: `deep_dive`, `watch`, or `demote`. |
+| `Reason` | The main reason for that suggestion. |
+
+### Adjacent Horizons
+
+Adjacent horizons are checked to avoid trusting a one-horizon spike.
+
+Canonical horizons are:
+
+```text
+5, 21, 63, 126, 252
+```
+
+Examples:
+
+| Cell horizon | Adjacent horizons checked |
+| ---: | --- |
+| 5 | 21 |
+| 21 | 5 and 63 |
+| 63 | 21 and 126 |
+| 126 | 63 and 252 |
+| 252 | 126 |
+
+An adjacent horizon can be rejected and still contain useful information. For
+example, `avg_dollar_volume_63__h126` was rejected for walk-forward instability,
+but its mean edge was still positive. That is weaker than a supportive
+`promising` adjacent cell, but it is not the same as an adjacent horizon with a
+negative edge.
+
+### Cost Sensitivity
+
+Cost sensitivity compares the observed edge to the current round-trip cost:
+
+```text
+cost multiple = edge / (round_trip_cost_bps / 10000)
+```
+
+Interpretation:
+
+| Cost sensitivity | Meaning |
+| --- | --- |
+| `low` | Edge is at least 5x the current round-trip cost. Costs are less likely to erase the result. |
+| `medium` | Edge is between 1x and 5x the current round-trip cost. Costs matter. |
+| `high` | Edge is below 1x the current round-trip cost. Costs can erase the result. |
+| `unknown` | Cost assumptions or edge were missing from the report row. |
+
+This is a first-pass pressure test. It is not a full transaction-cost stress
+test.
+
+### Recommendation Logic
+
+The current recommendation logic is intentionally conservative.
+
+`demote` if:
+
+- edge is missing
+- edge is smaller than one current round-trip cost
+- bucket win rate falls below the current 60% promising gate
+
+`deep_dive` if:
+
+- edge is at least 1.00%
+- cost sensitivity is low or unknown
+- adjacent horizons are not directly contradictory
+
+`watch` if:
+
+- the cell passed the promising gates but has a small edge
+- bucket win rate is close to the 60% gate
+- adjacent horizons are weak or mixed
+- label-scramble p-value is missing
+- cost sensitivity is unknown
+
+The rule should be treated as navigation. It is not a promotion rule.
+
+## How To Read It In The Terminal
+
+Start with the narrow summary:
+
+```bash
+rg -n "Promising Candidate Summary" reports/research/results_v0.md -A 40
+```
+
+The detailed markdown table is wide. `rg -C` is good for finding it, but not
+for reading it.
+
+Use:
+
+```bash
+less -S reports/research/results_v0.md
+```
+
+Then search:
+
+```text
+/Promising Candidate Review
+```
+
+Use the left and right arrow keys to scroll horizontally.
+
+The terminal-friendly summary is generated above the wide table:
+
+```text
+1. avg_dollar_volume_63__h252
+   recommendation: deep_dive
+   edge: +1.6025%
+   buckets: 21/35
+   reason: large edge with usable cost cushion
+```
+
+The summary is generated from the same data as the table and does not change
+any recommendation logic.
+
+## First Deep Dive
+
+The first current `deep_dive` is:
+
+```text
+avg_dollar_volume_63__h252
+```
+
+It deserves the first detailed inspection because:
+
+- it is the only current `deep_dive`
+- its edge is materially larger than the other promising cells
+- its edge has a larger cost cushion
+- the adjacent 126-session horizon had positive edge even though it failed the
+  walk-forward stability gate
+
+The deep-dive report should answer:
+
+| Question | Why it matters |
+| --- | --- |
+| Which years drove the edge? | Detect whether the result is broad or dominated by one regime. |
+| Which buckets failed? | Identify periods where the signal breaks. |
+| Which tickers were selected most often? | Detect concentration and mega-cap/liquidity bias. |
+| Did it mostly select the largest or most liquid names? | Determine whether the result is really a size/liquidity exposure. |
+| Why did 252 sessions pass while 126 sessions failed? | Understand whether the signal only works at long holding periods. |
+| How sensitive is it to higher costs? | Check whether the edge survives realistic friction. |
+| Does it overlap with momentum? | Determine whether this is a distinct signal or a proxy for another one. |
+
+The deep dive should still be read-only. It should not promote
+`avg_dollar_volume_63__h252` to `accepted`.
 
 ## Promotion Boundary
 
