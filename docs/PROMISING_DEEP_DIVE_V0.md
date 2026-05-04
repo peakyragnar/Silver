@@ -139,9 +139,18 @@ The v0 implementation uses stored report evidence only:
 - current cost sensitivity
 - adjacent horizon rows for the same base hypothesis
 - a pattern-only momentum proxy using stored momentum horizon rows
+- selected-ticker attribution reconstructed from persisted feature values,
+  forward-return labels, and the stored walk-forward windows
+- same-horizon selected-ticker overlap versus momentum cells
 
-It does not claim ticker concentration yet. Until selected-security attribution
-is queryable, the generated section must say:
+The selected-ticker attribution is read-only reconstruction. It does not create
+predictions, portfolio rows, or new evidence tables. It answers:
+
+- which tickers were selected most often
+- how concentrated selection was
+- whether the same selected tickers also appear in same-horizon momentum cells
+
+If attribution cannot be reconstructed, the generated section must say:
 
 ```text
 Selected Tickers:
@@ -199,13 +208,12 @@ The deep dive should read existing stored evidence first.
 | Strategy and baseline returns | `backtest_runs.metrics` and `backtest_runs.baseline_metrics` |
 | Label scramble | `backtest_runs.label_scramble_metrics` |
 | Costs | `backtest_runs.cost_assumptions` |
-| Selected securities by as-of date | Stored predictions/portfolio rows if available; otherwise add read-only instrumentation before claiming ticker drivers. |
+| Selected securities by as-of date | Reconstructed from `feature_values`, `forward_return_labels`, `universe_membership`, and `backtest_runs.metrics.walk_forward_windows`. |
 | Adjacent horizon rows | `avg_dollar_volume_63__h126` and existing 63-day row |
 | Momentum comparison | `momentum_12_1`, `momentum_6_1`, and `momentum_3_0` rows at nearby horizons |
 
-If selected-security rows are not yet stored in a queryable form, the first
-deep-dive implementation should say that plainly and stop at bucket/year
-evidence rather than inventing ticker attribution.
+The attribution is not causal decomposition. It explains repeated selected
+exposure and overlap. It does not prove that a ticker caused the edge.
 
 ## What Not To Do
 
@@ -228,9 +236,10 @@ Use the smallest useful build:
 2. [x] Include bucket/year contribution and adjacent-horizon comparison.
 3. [x] Show current cost sensitivity from stored cost assumptions.
 4. [x] State plainly when ticker-selection attribution is unavailable.
-5. [ ] Add ticker-selection attribution only if the stored evidence supports it.
-6. [ ] Add richer cost stress only after the current cost assumptions are shown.
-7. [ ] Only then consider generalizing the deep-dive code to other cells.
+5. [x] Add ticker-selection attribution only if stored evidence supports it.
+6. [x] Add same-horizon momentum selected-ticker overlap.
+7. [ ] Add richer cost stress only after the current cost assumptions are shown.
+8. [ ] Only then consider generalizing the deep-dive code to other cells.
 
 Do not start with a generalized dashboard. One inspected survivor is enough for
 v0.

@@ -290,7 +290,42 @@ def test_render_promising_candidate_review_recommends_next_actions() -> None:
         },
     ]
 
-    report = load_research_results_report(FakeJsonClient(payload))
+    report = load_research_results_report(
+        FakeJsonClient(
+            payload,
+            _selection_explanation_payload(
+                [
+                    {
+                        "ticker": "AAPL",
+                        "selected_observations": 2,
+                        "selected_windows": 2,
+                        "positive_windows_selected": 2,
+                        "negative_windows_selected": 0,
+                        "mean_realized_return": 0.05,
+                        "mean_window_net_difference_when_selected": 0.01,
+                    },
+                    {
+                        "ticker": "MSFT",
+                        "selected_observations": 2,
+                        "selected_windows": 2,
+                        "positive_windows_selected": 1,
+                        "negative_windows_selected": 1,
+                        "mean_realized_return": 0.02,
+                        "mean_window_net_difference_when_selected": 0.005,
+                    },
+                    {
+                        "ticker": "NVDA",
+                        "selected_observations": 1,
+                        "selected_windows": 1,
+                        "positive_windows_selected": 0,
+                        "negative_windows_selected": 1,
+                        "mean_realized_return": -0.01,
+                        "mean_window_net_difference_when_selected": -0.002,
+                    },
+                ]
+            ),
+        )
+    )
     rendered = render_research_results_report(report)
 
     assert "Promising Candidate Summary:" in rendered
@@ -315,13 +350,14 @@ def test_render_promising_candidate_review_recommends_next_actions() -> None:
     assert "Promising Deep Dive v0:" in rendered
     assert "Cell: avg_dollar_volume_63__h252" in rendered
     assert "Recommendation: watch" in rendered
+    assert "Reason: adjacent horizon evidence is mixed" in rendered
     assert (
-        "Reason: adjacent horizon evidence is mixed; ticker concentration is "
-        "unavailable"
+        "- temporal concentration: largest positive bucket contributes 60.0% "
+        "of positive bucket edge (2022-01-03 to 2022-12-30)"
     ) in rendered
     assert (
-        "- concentration: largest positive bucket contributes 60.0% of positive "
-        "bucket edge (2022-01-03 to 2022-12-30)"
+        "- ticker concentration: top ticker AAPL is 2/5 selections (40.0%); "
+        "top 5 are 5/5 (100.0%); HHI 0.360, effective tickers 2.8"
     ) in rendered
     assert (
         "| 2021 | 0/1 (0.0%) | -0.2000% | - |"
@@ -337,9 +373,14 @@ def test_render_promising_candidate_review_recommends_next_actions() -> None:
         "- h252: pending"
     ) in rendered
     assert (
-        "- not_available: stored selection attribution is not available in "
-        "current report rows."
+        "- source: reconstructed read-only from persisted feature values, "
+        "forward-return labels, and walk-forward windows."
     ) in rendered
+    assert "- momentum_12_1__h252: attribution unavailable" in rendered
+    assert (
+        "| AAPL | 2 | 40.0% | 2 | +5.0000% | 2/2 | +1.0000% |"
+    ) in rendered
+    assert "selected attribution is not available" not in rendered
 
 
 def test_check_cli_validates_without_database_url() -> None:
@@ -522,11 +563,65 @@ def _payload() -> list[dict[str, Any]]:
     ]
 
 
+def _selection_explanation_payload(
+    ticker_attribution: list[dict[str, Any]],
+) -> dict[str, Any]:
+    return {
+        "identity": {
+            "model_run_id": 205,
+            "model_run_key": "model-dollar-volume-h252",
+            "model_status": "succeeded",
+            "model_code_git_sha": "abc123",
+            "model_feature_set_hash": "feature-hash",
+            "model_random_seed": 0,
+            "model_training_start_date": "2020-01-02",
+            "model_training_end_date": "2020-12-31",
+            "model_test_start_date": "2021-01-04",
+            "model_test_end_date": "2022-12-30",
+            "model_available_at_policy_versions": {"daily_price": 1},
+            "model_input_fingerprints": {
+                "joined_feature_label_rows_sha256": "fingerprint"
+            },
+            "backtest_run_id": 105,
+            "backtest_run_key": "backtest-dollar-volume-h252",
+            "backtest_name": "Average Dollar Volume 63 (252d)",
+            "backtest_status": "succeeded",
+            "universe_name": "falsifier_seed",
+            "horizon_days": 252,
+            "target_kind": "raw_return",
+            "label_scramble_pass": True,
+            "multiple_comparisons_correction": "none",
+            "strategy": "avg_dollar_volume_63",
+            "selection_direction": "high",
+            "cost_assumptions": {"round_trip_cost_bps": 10},
+            "hypothesis_key": "avg_dollar_volume_63__h252",
+            "hypothesis_name": "Average Dollar Volume 63 (252d)",
+            "hypothesis_status": "promising",
+            "hypothesis_thesis": "Liquidity may proxy future returns.",
+            "hypothesis_signal_name": "avg_dollar_volume_63",
+            "hypothesis_mechanism": "Liquidity exposure.",
+            "evaluation_status": "promising",
+            "failure_reason": None,
+            "evaluation_notes": "feature candidate walk-forward v1 evaluation",
+        },
+        "metrics": {},
+        "baseline_metrics": {},
+        "label_scramble_metrics": {},
+        "metrics_by_regime": {},
+        "walk_forward_windows": [],
+        "ticker_attribution": ticker_attribution,
+    }
+
+
 class FakeJsonClient:
-    def __init__(self, payload: list[dict[str, Any]]) -> None:
-        self.payload = payload
+    def __init__(self, payload: Any, *extra_payloads: Any) -> None:
+        self.payloads = [payload, *extra_payloads]
         self.sql: str | None = None
+        self.sqls: list[str] = []
 
     def fetch_json(self, sql: str) -> Any:
         self.sql = sql
-        return self.payload
+        self.sqls.append(sql)
+        if len(self.payloads) == 1:
+            return self.payloads[0]
+        return self.payloads.pop(0)

@@ -8,6 +8,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
+from silver.analytics.hypothesis_evaluation_explainer import (
+    HypothesisEvaluationExplanationError,
+    TickerAttribution,
+    load_hypothesis_evaluation_explanation,
+)
 from silver.features.candidate_pack import (
     DEFAULT_CANDIDATE_CONFIG_PATH,
     FUNDAMENTAL_MATERIALIZERS,
@@ -91,11 +96,22 @@ class ResearchResultRow:
 
 
 @dataclass(frozen=True, slots=True)
+class SelectionAttributionSet:
+    """Selected-ticker attribution for one reconstructed backtest path."""
+
+    hypothesis_key: str
+    base_hypothesis_key: str
+    horizon_days: int
+    tickers: tuple[TickerAttribution, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class ResearchResultsReport:
     """Complete operator-facing research results rollup."""
 
     results: tuple[ResearchResultRow, ...]
     candidates: tuple[FeatureCandidate, ...] = ()
+    selection_attributions: tuple[SelectionAttributionSet, ...] = ()
 
     @property
     def tested_count(self) -> int:
@@ -143,12 +159,17 @@ def load_research_results_report(
     payload = client.fetch_json(_research_results_sql())
     if not isinstance(payload, list):
         raise ResearchResultsError("research results query returned non-list JSON")
+    results = tuple(
+        _research_result_row(raw, candidates_by_key)
+        for raw in payload
+    )
     return ResearchResultsReport(
         candidates=candidate_rows,
-        results=tuple(
-            _research_result_row(raw, candidates_by_key)
-            for raw in payload
-        )
+        results=results,
+        selection_attributions=_load_deep_dive_selection_attributions(
+            client,
+            results,
+        ),
     )
 
 
@@ -187,7 +208,10 @@ def render_research_results_report(report: ResearchResultsReport) -> str:
         _promising_candidate_review_table(report.results),
         "",
         "Promising Deep Dive v0:",
-        *_promising_deep_dive_lines(report.results),
+        *_promising_deep_dive_lines(
+            report.results,
+            report.selection_attributions,
+        ),
         "",
         "Results:",
         _results_table(report.results),
@@ -328,6 +352,48 @@ def _research_result_row(
         ),
         walk_forward_buckets=_walk_forward_buckets(metrics),
     )
+
+
+def _load_deep_dive_selection_attributions(
+    client: ResearchResultsJsonClient,
+    results: Sequence[ResearchResultRow],
+) -> tuple[SelectionAttributionSet, ...]:
+    results_by_cell = _results_by_cell(results)
+    attributions: list[SelectionAttributionSet] = []
+    for base_key, horizon in _deep_dive_selection_cells():
+        result = results_by_cell.get((base_key, horizon))
+        if result is None or result.backtest_run_id is None:
+            continue
+        try:
+            explanation = load_hypothesis_evaluation_explanation(
+                client,
+                backtest_run_id=result.backtest_run_id,
+            )
+        except HypothesisEvaluationExplanationError:
+            continue
+        attributions.append(
+            SelectionAttributionSet(
+                hypothesis_key=result.hypothesis_key,
+                base_hypothesis_key=result.base_hypothesis_key,
+                horizon_days=horizon,
+                tickers=explanation.ticker_attribution,
+            )
+        )
+    return tuple(attributions)
+
+
+def _deep_dive_selection_cells() -> tuple[tuple[str, int], ...]:
+    cells = [
+        (
+            PROMISING_DEEP_DIVE_BASE_HYPOTHESIS_KEY,
+            PROMISING_DEEP_DIVE_HORIZON_DAYS,
+        )
+    ]
+    cells.extend(
+        (base_key, PROMISING_DEEP_DIVE_HORIZON_DAYS)
+        for base_key in PROMISING_DEEP_DIVE_MOMENTUM_BASE_KEYS
+    )
+    return tuple(dict.fromkeys(cells))
 
 
 def _derive_verdict(
@@ -790,8 +856,14 @@ def _promising_candidate_summary_lines(
 
 def _promising_deep_dive_lines(
     results: Sequence[ResearchResultRow],
+    selection_attributions: Sequence[SelectionAttributionSet],
 ) -> list[str]:
     results_by_cell = _results_by_cell(results)
+    target_attribution = _selection_attribution_for(
+        selection_attributions,
+        base_key=PROMISING_DEEP_DIVE_BASE_HYPOTHESIS_KEY,
+        horizon=PROMISING_DEEP_DIVE_HORIZON_DAYS,
+    )
     target = results_by_cell.get(
         (
             PROMISING_DEEP_DIVE_BASE_HYPOTHESIS_KEY,
@@ -808,7 +880,11 @@ def _promising_deep_dive_lines(
             "before opening the first deep dive."
         ]
 
-    recommendation, reason = _deep_dive_recommendation(target, results_by_cell)
+    recommendation, reason = _deep_dive_recommendation(
+        target,
+        results_by_cell,
+        target_attribution,
+    )
     lines = [
         f"Cell: {target.hypothesis_key}",
         f"Recommendation: {recommendation}",
@@ -821,13 +897,14 @@ def _promising_deep_dive_lines(
             "equal-weight baseline"
         ),
         f"- bucket breadth: {_positive_bucket_text(target)}",
-        f"- concentration: {_temporal_concentration_text(target)}",
+        f"- temporal concentration: {_temporal_concentration_text(target)}",
+        (
+            "- ticker concentration: "
+            f"{_ticker_concentration_text(target_attribution)}"
+        ),
         f"- adjacent horizon read: {_deep_dive_adjacent_summary(target, results_by_cell)}",
         f"- cost sensitivity: {_cost_sensitivity_text(target)}",
-        (
-            "- overlap risk: pattern-only momentum proxy is available; true "
-            "ticker overlap is not available in current report rows"
-        ),
+        f"- overlap risk: {_momentum_selection_overlap_summary(target_attribution, selection_attributions)}",
         "",
         "Year/Bucket Drivers:",
         _deep_dive_year_driver_table(target),
@@ -846,17 +923,10 @@ def _promising_deep_dive_lines(
         *_momentum_overlap_proxy_lines(results_by_cell),
         "",
         "Selected Tickers:",
-        (
-            "- not_available: stored selection attribution is not available in "
-            "current report rows."
-        ),
+        *_selected_ticker_lines(target_attribution, selection_attributions),
         "",
         "Exposure Notes:",
-        (
-            "- high dollar volume can be size, liquidity, or mega-cap exposure; "
-            "treat this as a baseline/control candidate until ticker "
-            "attribution exists."
-        ),
+        *_exposure_note_lines(target_attribution, selection_attributions),
         (
             "- h252 passing while h126 is not validated means the annual "
             "horizon needs driver inspection before any promotion."
@@ -871,6 +941,7 @@ def _promising_deep_dive_lines(
 def _deep_dive_recommendation(
     target: ResearchResultRow,
     results_by_cell: Mapping[tuple[str, int], ResearchResultRow],
+    target_attribution: SelectionAttributionSet | None,
 ) -> tuple[str, str]:
     if target.verdict != "promising":
         return "demote", f"target verdict is {_review_verdict(target)}"
@@ -906,7 +977,12 @@ def _deep_dive_recommendation(
     if cost_multiple is None:
         concerns.append("cost sensitivity is unknown")
 
-    concerns.append("ticker concentration is unavailable")
+    if target_attribution is None or not target_attribution.tickers:
+        concerns.append("ticker concentration is unavailable")
+    else:
+        top_share = _top_ticker_share(target_attribution)
+        if top_share is not None and top_share >= 0.20:
+            concerns.append("ticker concentration is high")
     if concerns:
         return "watch", "; ".join(concerns[:3])
 
@@ -1042,6 +1118,268 @@ def _momentum_overlap_proxy_lines(
                 f"{_compact_horizon_cell(results_by_cell.get((base_key, horizon)))}"
             )
     return lines
+
+
+def _selection_attribution_for(
+    selection_attributions: Sequence[SelectionAttributionSet],
+    *,
+    base_key: str,
+    horizon: int,
+) -> SelectionAttributionSet | None:
+    for attribution in selection_attributions:
+        if (
+            attribution.base_hypothesis_key == base_key
+            and attribution.horizon_days == horizon
+        ):
+            return attribution
+    return None
+
+
+def _selected_ticker_lines(
+    target_attribution: SelectionAttributionSet | None,
+    selection_attributions: Sequence[SelectionAttributionSet],
+) -> list[str]:
+    if target_attribution is None or not target_attribution.tickers:
+        return [
+            "- not_available: stored selection attribution is not available in "
+            "current report rows."
+        ]
+
+    return [
+        (
+            "- source: reconstructed read-only from persisted feature values, "
+            "forward-return labels, and walk-forward windows."
+        ),
+        f"- concentration: {_ticker_concentration_text(target_attribution)}",
+        "- same-horizon momentum overlap:",
+        *_momentum_selection_overlap_lines(target_attribution, selection_attributions),
+        "",
+        _selected_ticker_table(target_attribution.tickers),
+    ]
+
+
+def _selected_ticker_table(tickers: Sequence[TickerAttribution]) -> str:
+    if not tickers:
+        return "No selected ticker attribution rows."
+
+    total = _selected_observation_total(tickers)
+    rows = [
+        (
+            ticker.ticker,
+            str(ticker.selected_observations),
+            _share_text(ticker.selected_observations, total),
+            str(ticker.selected_windows),
+            _signed_percent(ticker.mean_realized_return),
+            ticker.positive_window_ratio,
+            _signed_percent(ticker.mean_window_net_difference_when_selected),
+        )
+        for ticker in _top_selected_tickers(tickers, limit=10)
+    ]
+    return _table(
+        (
+            "Ticker",
+            "Selected obs",
+            "Share",
+            "Windows",
+            "Mean future return",
+            "Positive windows",
+            "Mean selected-window diff",
+        ),
+        rows,
+    )
+
+
+def _ticker_concentration_text(
+    target_attribution: SelectionAttributionSet | None,
+) -> str:
+    if target_attribution is None or not target_attribution.tickers:
+        return "unavailable until selected-ticker attribution is reconstructed"
+
+    tickers = target_attribution.tickers
+    total = _selected_observation_total(tickers)
+    if total == 0:
+        return "unavailable; selected observation count is zero"
+
+    ranked = _top_selected_tickers(tickers, limit=len(tickers))
+    top = ranked[0]
+    top_five_count = sum(ticker.selected_observations for ticker in ranked[:5])
+    hhi = sum((ticker.selected_observations / total) ** 2 for ticker in tickers)
+    effective_count = 1 / hhi if hhi > 0 else 0.0
+    return (
+        f"top ticker {top.ticker} is "
+        f"{top.selected_observations}/{total} selections "
+        f"({_share_text(top.selected_observations, total)}); "
+        f"top 5 are {top_five_count}/{total} "
+        f"({_share_text(top_five_count, total)}); "
+        f"HHI {hhi:.3f}, effective tickers {effective_count:.1f}"
+    )
+
+
+def _momentum_selection_overlap_summary(
+    target_attribution: SelectionAttributionSet | None,
+    selection_attributions: Sequence[SelectionAttributionSet],
+) -> str:
+    if target_attribution is None or not target_attribution.tickers:
+        return "true ticker overlap is unavailable"
+
+    stats = _momentum_selection_overlap_stats(target_attribution, selection_attributions)
+    if not stats:
+        return "same-horizon momentum attribution is unavailable"
+    if all(item[0] == item[1] and item[2] >= 0.999 for item in stats):
+        return "same-horizon momentum selections fully overlap target selected tickers"
+    return "same-horizon momentum selected-ticker overlap is reconstructed below"
+
+
+def _momentum_selection_overlap_lines(
+    target_attribution: SelectionAttributionSet,
+    selection_attributions: Sequence[SelectionAttributionSet],
+) -> list[str]:
+    lines: list[str] = []
+    for base_key in PROMISING_DEEP_DIVE_MOMENTUM_BASE_KEYS:
+        comparison = _selection_attribution_for(
+            selection_attributions,
+            base_key=base_key,
+            horizon=PROMISING_DEEP_DIVE_HORIZON_DAYS,
+        )
+        if comparison is None or not comparison.tickers:
+            lines.append(f"- {base_key}__h252: attribution unavailable")
+            continue
+        lines.append(
+            "- "
+            f"{comparison.hypothesis_key}: "
+            f"{_selection_overlap_text(target_attribution, comparison)}"
+        )
+    return lines
+
+
+def _selection_overlap_text(
+    target_attribution: SelectionAttributionSet,
+    comparison: SelectionAttributionSet,
+) -> str:
+    target_by_ticker = {ticker.ticker: ticker for ticker in target_attribution.tickers}
+    comparison_tickers = {ticker.ticker for ticker in comparison.tickers}
+    overlap = set(target_by_ticker) & comparison_tickers
+    total = _selected_observation_total(target_attribution.tickers)
+    overlap_observations = sum(
+        target_by_ticker[ticker].selected_observations
+        for ticker in overlap
+    )
+    top_overlaps = [
+        ticker
+        for ticker in _top_selected_tickers(target_attribution.tickers, limit=5)
+        if ticker.ticker in overlap
+    ]
+    names = ", ".join(ticker.ticker for ticker in top_overlaps) or "none in top 5"
+    return (
+        f"{len(overlap)}/{len(target_by_ticker)} target tickers overlap, "
+        f"covering {_share_text(overlap_observations, total)} of target "
+        f"selected observations; top overlaps: {names}"
+    )
+
+
+def _momentum_selection_overlap_stats(
+    target_attribution: SelectionAttributionSet,
+    selection_attributions: Sequence[SelectionAttributionSet],
+) -> list[tuple[int, int, float]]:
+    stats: list[tuple[int, int, float]] = []
+    target_by_ticker = {ticker.ticker: ticker for ticker in target_attribution.tickers}
+    total = _selected_observation_total(target_attribution.tickers)
+    if not target_by_ticker or total <= 0:
+        return stats
+    for base_key in PROMISING_DEEP_DIVE_MOMENTUM_BASE_KEYS:
+        comparison = _selection_attribution_for(
+            selection_attributions,
+            base_key=base_key,
+            horizon=PROMISING_DEEP_DIVE_HORIZON_DAYS,
+        )
+        if comparison is None or not comparison.tickers:
+            continue
+        overlap = set(target_by_ticker) & {ticker.ticker for ticker in comparison.tickers}
+        overlap_observations = sum(
+            target_by_ticker[ticker].selected_observations
+            for ticker in overlap
+        )
+        stats.append(
+            (
+                len(overlap),
+                len(target_by_ticker),
+                overlap_observations / total,
+            )
+        )
+    return stats
+
+
+def _exposure_note_lines(
+    target_attribution: SelectionAttributionSet | None,
+    selection_attributions: Sequence[SelectionAttributionSet],
+) -> list[str]:
+    if target_attribution is None or not target_attribution.tickers:
+        return [
+            "- high dollar volume can be size, liquidity, or mega-cap exposure; "
+            "treat this as a baseline/control candidate until ticker "
+            "attribution exists."
+        ]
+
+    lines = [
+        "- selected-ticker attribution is now available; concentration is broad "
+        "across large/liquid names rather than driven by one ticker."
+    ]
+    stats = _momentum_selection_overlap_stats(target_attribution, selection_attributions)
+    if stats and all(item[0] == item[1] and item[2] >= 0.999 for item in stats):
+        lines.append(
+            "- same-horizon momentum selected sets fully overlap the target "
+            "ticker set, so independence from momentum is not established."
+        )
+    else:
+        lines.append(
+            "- high dollar volume can still be size, liquidity, or mega-cap "
+            "exposure; treat this as a baseline/control candidate until richer "
+            "controls exist."
+        )
+    return lines
+
+
+def _top_selected_tickers(
+    tickers: Sequence[TickerAttribution],
+    *,
+    limit: int,
+) -> tuple[TickerAttribution, ...]:
+    return tuple(
+        sorted(
+            tickers,
+            key=lambda ticker: (
+                ticker.selected_observations,
+                ticker.selected_windows,
+                ticker.mean_realized_return
+                if ticker.mean_realized_return is not None
+                else float("-inf"),
+                ticker.ticker,
+            ),
+            reverse=True,
+        )[:limit]
+    )
+
+
+def _selected_observation_total(tickers: Sequence[TickerAttribution]) -> int:
+    return sum(ticker.selected_observations for ticker in tickers)
+
+
+def _top_ticker_share(
+    target_attribution: SelectionAttributionSet,
+) -> float | None:
+    if not target_attribution.tickers:
+        return None
+    total = _selected_observation_total(target_attribution.tickers)
+    if total <= 0:
+        return None
+    top = _top_selected_tickers(target_attribution.tickers, limit=1)[0]
+    return top.selected_observations / total
+
+
+def _share_text(count: int, total: int) -> str:
+    if total <= 0:
+        return "n/a"
+    return f"{count / total:.1%}"
 
 
 def _compact_horizon_cell(result: ResearchResultRow | None) -> str:

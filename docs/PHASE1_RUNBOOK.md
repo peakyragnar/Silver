@@ -431,8 +431,10 @@ docs/PROMISING_DEEP_DIVE_V0.md
 The cockpit now includes a generated `Promising Deep Dive v0` section for the
 first current deep-dive cell, `avg_dollar_volume_63__h252`. It summarizes
 bucket/year drivers, adjacent horizons, cost sensitivity, and a momentum-pattern
-proxy. It does not claim ticker concentration; if selected ticker attribution is
-not available in stored report rows, the section says so plainly.
+proxy. It also reconstructs selected-ticker attribution from persisted feature
+values, labels, universe membership, and stored walk-forward windows. That
+attribution shows selection frequency, concentration, and same-horizon momentum
+overlap without writing predictions or portfolio rows.
 
 ## 9. Read The Falsifier Report
 
